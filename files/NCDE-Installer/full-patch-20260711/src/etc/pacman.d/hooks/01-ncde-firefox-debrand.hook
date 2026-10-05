@@ -1,0 +1,14 @@
+# NCDE fix 2026-07-17 — re-apply Firefox de-branding after every Firefox
+# install/upgrade (commercial.md Identity/Branding rule: no user-visible Arch
+# mentions). distribution.ini is not in firefox's backup array, so pacman
+# silently overwrites it with Arch's version on every update without this.
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = firefox
+
+[Action]
+Description = NCDE: re-branding Firefox distribution.ini...
+When = PostTransaction
+Exec = /usr/local/lib/ncde/ncde-firefox-debrand

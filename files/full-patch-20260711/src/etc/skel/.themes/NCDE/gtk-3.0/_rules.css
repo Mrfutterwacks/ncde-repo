@@ -1,0 +1,334 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   NCDE GTK3 — complete widget styling (shared by dark + light modes).
+   NCDE ships its OWN full theme — there is NO Adwaita import anywhere. Every
+   widget is grounded here. THE ONE RULE: only @named colors and shade()/alpha()
+   of named colors — never a literal hex — so one Iris Chroma click recolors the
+   whole toolkit (Parchment-class). Target: GTK 3.24.52.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+* {
+  outline-color: alpha(@ncde_accent, 0.55);
+  -gtk-secondary-caret-color: @ncde_accent;
+}
+
+/* ── base surfaces ──────────────────────────────────────────────────────── */
+window, dialog, .background, assistant, messagedialog {
+  background-color: @theme_bg_color;
+  color: @theme_fg_color;
+}
+.view, textview, textview text, iconview, flowbox,
+treeview.view, list, list row, columnview, gridview, .content-view {
+  background-color: @theme_base_color;
+  color: @theme_text_color;
+}
+label { color: inherit; }
+label:disabled, .dim-label { color: @insensitive_fg_color; }
+.dim-label { opacity: 1; }
+separator {
+  background-color: alpha(@borders, 0.55);
+  min-width: 1px; min-height: 1px;
+}
+
+/* ── buttons ────────────────────────────────────────────────────────────── */
+button, .button {
+  background-image: none;
+  background-color: shade(@theme_bg_color, 1.10);
+  color: @theme_fg_color;
+  border: 1px solid @borders;
+  border-radius: 5px;
+  padding: 5px 12px;
+  text-shadow: none;
+}
+button:hover, .button:hover { background-color: shade(@theme_bg_color, 1.22); }
+button:active, button:checked, .button:active, .button:checked {
+  background-color: @ncde_accent;
+  color: @theme_selected_fg_color;
+  border-color: @ncde_accent;
+}
+button:disabled, .button:disabled {
+  background-color: shade(@theme_bg_color, 1.02);
+  color: @insensitive_fg_color;
+  border-color: alpha(@borders, 0.5);
+}
+button.flat, button.link, .button.flat {
+  background-color: transparent;
+  border-color: transparent;
+}
+button.flat:hover { background-color: alpha(@theme_fg_color, 0.08); }
+button.suggested-action {
+  background-color: @ncde_accent;
+  color: @theme_selected_fg_color;
+  border-color: @ncde_accent;
+}
+button.destructive-action {
+  background-color: @error_color;
+  color: #FFFFFF;
+  border-color: @error_color;
+}
+button.circular { border-radius: 9999px; }
+spinbutton { background-color: @theme_base_color; color: @theme_text_color; border: 1px solid @borders; border-radius: 5px; }
+spinbutton button { border: none; background-color: transparent; }
+
+/* ── entries / text fields ──────────────────────────────────────────────── */
+entry, .entry, spinbutton entry, searchentry {
+  background-color: @theme_base_color;
+  color: @theme_text_color;
+  border: 1px solid @borders;
+  border-radius: 5px;
+  padding: 5px 8px;
+  caret-color: @theme_text_color;
+}
+entry:focus, entry:focus-within, .entry:focus, searchentry:focus-within {
+  border-color: @ncde_accent;
+  box-shadow: inset 0 0 0 1px @ncde_accent;
+}
+entry:disabled { color: @insensitive_fg_color; background-color: shade(@theme_base_color, 1.02); }
+entry selection { background-color: @theme_selected_bg_color; color: @theme_selected_fg_color; }
+entry image { color: @insensitive_fg_color; }
+entry.error { border-color: @error_color; box-shadow: inset 0 0 0 1px @error_color; }
+entry.warning { border-color: @warning_color; }
+
+/* ── headerbars, toolbars, action bars ──────────────────────────────────── */
+headerbar, .titlebar, .csd .titlebar, headerbar.default-decoration {
+  background-image: none;
+  background-color: shade(@theme_bg_color, 0.92);
+  color: @theme_fg_color;
+  border-bottom: 1px solid @borders;
+  padding: 4px 6px;
+}
+headerbar:backdrop, .titlebar:backdrop {
+  background-color: shade(@theme_unfocused_bg_color, 0.94);
+  color: @theme_unfocused_fg_color;
+}
+headerbar .title { font-weight: bold; color: @theme_fg_color; }
+headerbar .subtitle { color: @insensitive_fg_color; }
+toolbar, .toolbar, .primary-toolbar, actionbar, actionbar > revealer > box, searchbar > revealer > box {
+  background-image: none;
+  background-color: shade(@theme_bg_color, 0.92);
+  color: @theme_fg_color;
+  padding: 4px;
+}
+.inline-toolbar { background-color: shade(@theme_bg_color, 0.96); border: 1px solid @borders; }
+
+/* ── menus, menubars, popovers ──────────────────────────────────────────── */
+menubar, .menubar {
+  background-color: shade(@theme_bg_color, 0.92);
+  color: @theme_fg_color;
+}
+menubar > menuitem { padding: 4px 8px; }
+menubar > menuitem:hover, menubar > menuitem:selected {
+  background-color: @ncde_accent; color: @theme_selected_fg_color;
+}
+menu, .menu, .context-menu, popover.background.menu, popover.background modelbutton {
+  background-color: @theme_bg_color;
+  color: @theme_fg_color;
+  border: 1px solid @borders;
+  padding: 2px;
+}
+menu menuitem, .menu menuitem { padding: 5px 8px; border-radius: 4px; }
+menuitem:hover, menu menuitem:hover, menuitem:selected,
+modelbutton:hover, popover modelbutton:hover {
+  background-color: @ncde_accent;
+  color: @theme_selected_fg_color;
+}
+menuitem:disabled, modelbutton:disabled { color: @insensitive_fg_color; }
+menuitem accelerator { color: alpha(@theme_fg_color, 0.55); }
+popover, popover.background {
+  background-color: @theme_bg_color;
+  color: @theme_fg_color;
+  border: 1px solid @borders;
+  border-radius: 8px;
+  padding: 6px;
+}
+popover > arrow { background-color: @theme_bg_color; border: 1px solid @borders; }
+separator.horizontal, menu separator { background-color: alpha(@borders, 0.5); }
+
+/* ── notebook / tabs ────────────────────────────────────────────────────── */
+notebook > header {
+  background-color: shade(@theme_bg_color, 0.92);
+  border-color: @borders;
+}
+notebook > header > tabs > tab {
+  color: @insensitive_fg_color;
+  padding: 5px 12px;
+  border: 1px solid transparent;
+}
+notebook > header > tabs > tab:checked {
+  color: @theme_fg_color;
+  background-color: @theme_bg_color;
+  border-color: @borders;
+  box-shadow: inset 0 -2px 0 0 @ncde_accent;
+}
+notebook > header > tabs > tab:hover:not(:checked) { color: @theme_fg_color; }
+notebook > stack { background-color: @theme_bg_color; }
+stackswitcher button:checked { box-shadow: inset 0 -2px 0 0 @ncde_accent; }
+
+/* ── lists, treeviews, columns ──────────────────────────────────────────── */
+treeview.view header button {
+  background-color: shade(@theme_bg_color, 0.96);
+  color: @theme_fg_color;
+  border: 1px solid @borders;
+  border-radius: 0;
+}
+treeview.view:selected, list row:selected,
+columnview row:selected, gridview child:selected, flowbox flowboxchild:selected,
+row:selected, iconview:selected {
+  background-color: @theme_selected_bg_color;
+  color: @theme_selected_fg_color;
+}
+treeview.view:hover, list row:hover, columnview row:hover,
+gridview child:hover, flowbox flowboxchild:hover {
+  background-color: alpha(@ncde_accent, 0.18);
+}
+treeview.view:selected:hover { background-color: shade(@theme_selected_bg_color, 1.08); }
+list, list.content { border: 1px solid @borders; border-radius: 6px; }
+list row { padding: 4px 8px; }
+list.content > row:not(:last-child) { border-bottom: 1px solid alpha(@borders, 0.5); }
+
+/* ── selection / links / accent-bearing states ─────────────────────────── */
+selection, *:selected, *:selected:focus {
+  background-color: @theme_selected_bg_color;
+  color: @theme_selected_fg_color;
+}
+*:link, button.link, .link { color: @ncde_accent; }
+*:visited { color: shade(@ncde_accent, 0.85); }
+*:disabled { color: @insensitive_fg_color; }
+
+/* ── checks, radios, switches ───────────────────────────────────────────── */
+check, checkbutton check, radio, radiobutton radio {
+  background-color: @theme_base_color;
+  border: 1px solid @borders;
+  min-width: 16px; min-height: 16px;
+}
+check { border-radius: 4px; }
+radio { border-radius: 9999px; }
+check:checked, checkbutton check:checked, check:indeterminate,
+radio:checked, radiobutton radio:checked {
+  background-color: @ncde_accent;
+  border-color: @ncde_accent;
+  color: @theme_selected_fg_color;
+}
+switch {
+  background-color: shade(@theme_bg_color, 0.85);
+  border: 1px solid @borders;
+  border-radius: 9999px;
+  min-width: 46px; min-height: 22px;
+}
+switch:checked { background-color: @ncde_accent; border-color: @ncde_accent; }
+switch slider {
+  background-color: @theme_base_color;
+  border: 1px solid @borders;
+  border-radius: 9999px;
+  min-width: 18px; min-height: 18px;
+  margin: 1px;
+}
+switch:checked slider { border-color: @ncde_accent; }
+
+/* ── scales / sliders ───────────────────────────────────────────────────── */
+scale trough {
+  background-color: shade(@theme_bg_color, 0.85);
+  border: 1px solid @borders;
+  border-radius: 9999px;
+  min-height: 5px; min-width: 5px;
+}
+scale highlight, scale fill {
+  background-color: @ncde_accent;
+  border-radius: 9999px;
+}
+scale slider {
+  background-color: @theme_base_color;
+  border: 1px solid @borders;
+  border-radius: 9999px;
+  min-width: 16px; min-height: 16px;
+}
+scale slider:hover { background-color: shade(@theme_base_color, 1.1); border-color: @ncde_accent; }
+scale marks, scale value { color: @insensitive_fg_color; }
+
+/* ── progress ───────────────────────────────────────────────────────────── */
+progressbar > trough {
+  background-color: shade(@theme_bg_color, 0.85);
+  border: 1px solid @borders;
+  border-radius: 9999px;
+  min-height: 6px;
+}
+progressbar > trough > progress {
+  background-color: @ncde_accent;
+  border-radius: 9999px;
+  min-height: 6px;
+}
+progressbar text { color: @theme_fg_color; }
+levelbar block.filled { background-color: @ncde_accent; }
+levelbar block.high { background-color: @success_color; }
+levelbar block.low { background-color: @warning_color; }
+levelbar block.empty { background-color: shade(@theme_bg_color, 0.85); }
+spinner { color: @ncde_accent; }
+
+/* ── scrollbars ─────────────────────────────────────────────────────────── */
+scrollbar {
+  background-color: transparent;
+  border: none;
+}
+scrollbar slider {
+  background-color: alpha(@theme_fg_color, 0.35);
+  border-radius: 9999px;
+  min-width: 8px; min-height: 8px;
+  margin: 2px;
+}
+scrollbar slider:hover { background-color: alpha(@theme_fg_color, 0.55); }
+scrollbar slider:active { background-color: @ncde_accent; }
+scrollbar.overlay-indicator slider { background-color: alpha(@theme_fg_color, 0.4); }
+
+/* ── tooltips ───────────────────────────────────────────────────────────── */
+tooltip, tooltip.background {
+  background-color: @tooltip_bg_color;
+  color: @tooltip_fg_color;
+  border: 1px solid @borders;
+  border-radius: 6px;
+}
+tooltip * { color: @tooltip_fg_color; }
+
+/* ── info / notification bars ───────────────────────────────────────────── */
+infobar, .infobar { background-color: shade(@theme_bg_color, 0.96); color: @theme_fg_color; }
+infobar.info > revealer > box { background-color: alpha(@ncde_accent, 0.15); }
+infobar.warning > revealer > box { background-color: alpha(@warning_color, 0.2); }
+infobar.error > revealer > box { background-color: alpha(@error_color, 0.2); }
+.app-notification { background-color: @theme_bg_color; color: @theme_fg_color; border: 1px solid @borders; border-radius: 8px; }
+
+/* ── sidebar / places ───────────────────────────────────────────────────── */
+.sidebar, placessidebar, placessidebar list {
+  background-color: shade(@theme_bg_color, 0.96);
+  color: @theme_fg_color;
+  border-right: 1px solid @borders;
+}
+.sidebar row:selected, placessidebar row:selected {
+  background-color: @theme_selected_bg_color; color: @theme_selected_fg_color;
+}
+.sidebar row:hover, placessidebar row:hover { background-color: alpha(@ncde_accent, 0.15); }
+
+/* ── calendar (GTK date pickers) ────────────────────────────────────────── */
+calendar { background-color: @theme_base_color; color: @theme_text_color; border: 1px solid @borders; }
+calendar:selected { background-color: @ncde_accent; color: @theme_selected_fg_color; border-radius: 4px; }
+calendar.header, calendar.button { color: @theme_fg_color; }
+calendar.highlight { color: @ncde_accent; }
+
+/* ── frames / separators / misc panes ───────────────────────────────────── */
+frame > border, .frame { border: 1px solid @borders; border-radius: 4px; }
+paned > separator { background-color: alpha(@borders, 0.5); }
+expander title { color: @theme_fg_color; }
+expander arrow { color: @insensitive_fg_color; }
+.osd { background-color: @tooltip_bg_color; color: @tooltip_fg_color; border-radius: 8px; }
+
+/* ── window controls (CSD close/min/max) ────────────────────────────────── */
+windowcontrols button { background-color: transparent; border-color: transparent; }
+windowcontrols button:hover { background-color: alpha(@theme_fg_color, 0.12); }
+windowcontrols button.close:hover { background-color: @error_color; color: #FFFFFF; }
+
+/* ── combobox / dropdowns ───────────────────────────────────────────────── */
+combobox button, dropdown button {
+  background-color: shade(@theme_bg_color, 1.06);
+  color: @theme_fg_color;
+  border: 1px solid @borders;
+  border-radius: 5px;
+}
+combobox button:hover, dropdown button:hover { background-color: shade(@theme_bg_color, 1.16); }
+combobox window.popup, dropdown popover { background-color: @theme_bg_color; border: 1px solid @borders; }

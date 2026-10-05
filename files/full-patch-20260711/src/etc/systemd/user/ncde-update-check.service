@@ -1,0 +1,7 @@
+[Unit]
+Description=NCDE update-availability notifier
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/ncde-update-notify

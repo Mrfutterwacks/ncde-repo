@@ -1,0 +1,2 @@
+#!/bin/sh
+printf '%s\n' "$@" >> "$MENU_TEST_RECORD"

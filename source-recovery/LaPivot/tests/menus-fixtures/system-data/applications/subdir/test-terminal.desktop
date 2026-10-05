@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Test Terminal
+Exec=record-app terminal
+Icon=terminal
+Categories=System;TerminalEmulator;
+NoDisplay=false
+Hidden=false

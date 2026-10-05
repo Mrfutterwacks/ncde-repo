@@ -1,0 +1,9 @@
+#!/bin/bash
+# ncde-snapshot-preupdate — runs the standard Soundings boot snapshotter before
+# a pacman transaction, then retags the newest snapshot's sidecar "update" so
+# the recovery UI shows why it exists. Never blocks the update (hook has no
+# AbortOnFail); ncde-snapshot's own KEEP/space-valve pruning applies unchanged.
+/usr/local/lib/ncde/ncde-snapshot || exit 0
+meta=$(ls -1 /restore/BAK-*.meta 2>/dev/null | sort | tail -1)
+[ -n "$meta" ] && sed -i 's/"tag":"boot"/"tag":"update"/' "$meta"
+exit 0

@@ -1,0 +1,469 @@
+// FolderList.qml — Orchidée list/details view mode.
+// Flat sortable table: Kind | Name | Size | Type | Modified.
+// Folder rows navigate; file rows open FilePreview to the right.
+// Drag-and-drop (2026-07-06, Thunar model): rows drag; folder rows accept drops.
+import QtQuick 2.15
+import "ncde-color.js" as Col
+import QtQuick.Window 2.15
+
+Item {
+    id: flist
+    property string dirPath:       ""
+    property string sortField:     "name"
+    property bool   sortAscending: true
+    property string selectedFile:  ""
+
+    signal openDir(string path)
+    signal pickFile(string path)
+    signal acted(string kind)
+    signal sortChanged(string field, bool ascending)
+    signal moveRequested(string path)
+    signal moved(string name)
+    // 2026-07-07 UX pack — context-menu verbs handled by OrchideeApp
+    signal renameRequested(string path)
+    signal cutRequested(string path)
+    signal copyRequested(string path)
+    signal tossRequested(string path)
+    // cut/copy → paste into another folder (2026-09-24): Paste lives in the
+    // right-click menu, on a folder ("Paste Into Folder") or on empty space.
+    signal pasteRequested(string destDir)
+    property bool canPaste: false        // bound from OrchideeApp: something is on the tray
+    property bool menuIsDir: false
+
+    // type-ahead find: start typing → jump to the first name match
+    focus: true
+    property string typeBuf: ""
+    Timer { id: typeBufReset; interval: 900; onTriggered: flist.typeBuf = "" }
+    Keys.onPressed: function(event) {
+        if (!event.text || event.text.length !== 1 || event.text < " ") return
+        typeBuf += event.text.toLowerCase()
+        typeBufReset.restart()
+        for (var i = 0; i < sortedRows.length; i++) {
+            if (sortedRows[i].name.toLowerCase().indexOf(typeBuf) === 0) {
+                selectedFile = sortedRows[i].path
+                if (!sortedRows[i].isDir) pickFile(sortedRows[i].path)
+                lv.positionViewAtIndex(i, ListView.Contain)
+                break
+            }
+        }
+        event.accepted = true
+    }
+
+    // drag-and-drop (2026-07-06, Thunar model — same pattern as MillerColumn)
+    function dropOk(src, destDir) {
+        if (!src || !src.dragPath || src.dragPath === destDir) return false
+        if (orchidee.parentOf(src.dragPath) === destDir) return false
+        if (src.dragIsDir && (destDir + "/").indexOf(src.dragPath + "/") === 0) return false
+        return true
+    }
+
+    property string menuPath: ""
+    function openContextMenu(path, x, y) {
+        flist.menuPath = path
+        flist.menuIsDir = false
+        for (var i = 0; i < flist.rows.length; i++)
+            if (flist.rows[i].path === path) { flist.menuIsDir = flist.rows[i].isDir === true; break }
+        listCtxMenu.x = Math.max(2, Math.min(x, flist.width  - listCtxMenu.width  - 2))
+        listCtxMenu.y = Math.max(2, Math.min(y, flist.height - listCtxMenu.height - 2))
+        listCtxMenu.visible = true
+    }
+    function closeContextMenu() { listCtxMenu.visible = false; flist.menuPath = "" }
+
+    NCDEKit { id: k }
+    // menu text on the cream card: palette ink pushed to 7:1 against it
+    // (dark palettes gave cream-on-cream, unreadable — 2026-09-24)
+    readonly property color menuInk: Col.readable(k.ink, k.surfaceHi, 7.0)
+    // right-click on empty space (no tile under the pointer) → Paste here
+    TapHandler {
+        acceptedButtons: Qt.RightButton
+        onTapped: (eventPoint) => {
+            var lp = lv.mapFromItem(null, eventPoint.scenePosition.x, eventPoint.scenePosition.y)
+            if (lv.indexAt(lp.x + lv.contentX, lp.y + lv.contentY) !== -1 || !flist.canPaste) return
+            var p = flist.mapFromItem(null, eventPoint.scenePosition.x, eventPoint.scenePosition.y)
+            flist.openContextMenu("", p.x, p.y)
+        }
+    }
+    readonly property color goldDeep: k.gilt1
+    readonly property color gold1:    k.gilt0
+    readonly property color burg4:    k.wine4
+    readonly property color ink:      k.ink
+    readonly property color cream:    k.surfaceHi
+
+    // Column widths — used by both header and delegate rows
+    readonly property int cKind: 28
+    readonly property int cSize: 80
+    readonly property int cType: 110
+    readonly property int cMod:  120
+
+    property bool showHidden: false      // bound from OrchideeApp (Ctrl+H)
+    onShowHiddenChanged: reload()
+    property var rows: []
+    function reload() { rows = orchidee.entries(dirPath, showHidden) }
+    Component.onCompleted: reload()
+    onDirPathChanged: { selectedFile = ""; reload() }
+
+    Connections {
+        target: orchidee
+        function onChanged(p) { if (p === flist.dirPath) flist.reload() }
+    }
+
+    property var sortedRows: {
+        var r = rows.slice()
+        var f = sortField, asc = sortAscending
+        r.sort(function(a, b) {
+            if (a.isDir && !b.isDir) return -1
+            if (!a.isDir && b.isDir) return  1
+            var av, bv
+            if      (f === "size")     { av = a.sizeBytes  || 0;  bv = b.sizeBytes  || 0  }
+            else if (f === "type")     { av = (a.type || "").toLowerCase();
+                                         bv = (b.type || "").toLowerCase() }
+            else if (f === "modified") { av = a.modifiedMs || 0;  bv = b.modifiedMs || 0  }
+            else                       { av = a.name.toLowerCase();
+                                         bv = b.name.toLowerCase() }
+            if (av < bv) return asc ? -1 :  1
+            if (av > bv) return asc ?  1 : -1
+            return 0
+        })
+        return r
+    }
+
+    Row {
+        anchors.fill: parent
+
+        Item {
+            id: listArea
+            width: flist.selectedFile !== "" ? parent.width - 240 : parent.width
+            height: parent.height
+
+            // ── Header ───────────────────────────────────────────
+            Item {
+                id: header
+                width: parent.width; height: 28
+                z: 2
+                Rectangle {
+                    anchors.fill: parent
+                    color: Qt.rgba(248/255,239/255,216/255,0.95)
+                }
+                Rectangle {
+                    anchors.bottom: parent.bottom
+                    width: parent.width; height: 1
+                    color: flist.goldDeep; opacity: 0.35
+                }
+                Row {
+                    anchors.fill: parent
+                    Item { width: flist.cKind; height: parent.height }
+                    HeaderCell {
+                        field: "name"; label: "Name"
+                        width: parent.width - flist.cKind - flist.cSize - flist.cType - flist.cMod
+                        height: parent.height
+                    }
+                    HeaderCell { field: "size";     label: "Size";     width: flist.cSize; height: parent.height }
+                    HeaderCell { field: "type";     label: "Type";     width: flist.cType; height: parent.height }
+                    HeaderCell { field: "modified"; label: "Modified"; width: flist.cMod;  height: parent.height }
+                }
+            }
+
+            // ── File rows ─────────────────────────────────────────
+            ListView {
+                id: lv
+                anchors.top: header.bottom
+                anchors.bottom: parent.bottom
+                width: parent.width
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                model: flist.sortedRows
+
+                delegate: Item {
+                    id: row
+                    width: lv.width; height: 30
+                    readonly property bool sel: modelData.path === flist.selectedFile
+
+                    Rectangle {
+                        anchors.fill: parent
+                        anchors.leftMargin: 4; anchors.rightMargin: 4
+                        radius: 5
+                        color: row.sel ? flist.burg4
+                                       : (rowHov.hovered ? Qt.rgba(139/255,30/255,63/255,0.08) : "transparent")
+                        border.width: listRowDrop.enabled && listRowDrop.containsDrag ? 2 : 0
+                        border.color: flist.gold
+                    }
+                    // folder rows catch dragged items (Thunar move)
+                    DropArea {
+                        id: listRowDrop
+                        anchors.fill: parent
+                        enabled: modelData.isDir === true
+                        onDropped: {
+                            // a bin item dragged out → restore it INTO this folder
+                            if (drag.source && drag.source.dragBinName) {
+                                if (binnieTrash.restoreTo(drag.source.dragBinName, modelData.path))
+                                    flist.moved(drag.source.dragBinName)
+                                return
+                            }
+                            if (!flist.dropOk(drag.source, modelData.path)) return
+                            var nm = orchidee.baseName(drag.source.dragPath)
+                            if (orchidee.moveTo(drag.source.dragPath, modelData.path)) flist.moved(nm)
+                        }
+                    }
+                    // drag ghost — parchment pill floating above the whole window
+                    Item {
+                        id: listDragProxy
+                        parent: row.Window.window ? row.Window.window.contentItem : row
+                        z: 5000
+                        width: 170; height: 30
+                        visible: listDragH.active
+                        Drag.active: listDragH.active
+                        Drag.hotSpot: Qt.point(width / 2, height / 2)
+                        property string dragPath: modelData.path
+                        property bool   dragIsDir: modelData.isDir === true
+                        Rectangle {
+                            anchors.fill: parent; radius: 7
+                            color: flist.cream; border.color: flist.goldDeep; border.width: 1.5
+                            opacity: 0.94
+                            Row {
+                                anchors.fill: parent; anchors.leftMargin: 9
+                                spacing: 6
+                                Text { anchors.verticalCenter: parent.verticalCenter
+                                       text: modelData.isDir ? "▸" : flist.glyph(modelData.kind)
+                                       color: flist.goldDeep; font.pixelSize: theme.fontSmall }
+                                Text { anchors.verticalCenter: parent.verticalCenter
+                                       width: parent.width - 34; elide: Text.ElideRight
+                                       text: modelData.name; color: flist.ink
+                                       font.family: theme.fontFamily; font.weight: settings.fontWeight; font.italic: settings.fontItalic; font.letterSpacing: theme.letterSpacing; font.pixelSize: theme.fontSmall }
+                            }
+                        }
+                    }
+                    DragHandler {
+                        id: listDragH
+                        target: listDragProxy
+                        onActiveChanged: {
+                            if (active) {
+                                var sp = centroid.scenePosition
+                                listDragProxy.x = sp.x - listDragProxy.width / 2
+                                listDragProxy.y = sp.y - listDragProxy.height / 2
+                            } else {
+                                listDragProxy.Drag.drop()
+                            }
+                        }
+                    }
+
+                    Row {
+                        anchors.fill: parent
+                        // Kind glyph
+                        Text {
+                            width: flist.cKind; height: parent.height
+                            verticalAlignment: Text.AlignVCenter
+                            horizontalAlignment: Text.AlignHCenter
+                            text: modelData.isDir ? "▸" : flist.glyph(modelData.kind)
+                            font.pixelSize: theme.fontSmall
+                            color: row.sel ? flist.cream : flist.gold1
+                        }
+                        // Name
+                        Text {
+                            width: parent.width - flist.cKind - flist.cSize - flist.cType - flist.cMod
+                            height: parent.height
+                            verticalAlignment: Text.AlignVCenter
+                            elide: Text.ElideRight
+                            text: modelData.name
+                            font.family: theme.fontFamily; font.weight: settings.fontWeight; font.italic: settings.fontItalic; font.letterSpacing: theme.letterSpacing; font.pixelSize: theme.fontMedium
+                            color: row.sel ? flist.cream : flist.ink
+                        }
+                        // Size
+                        Text {
+                            width: flist.cSize; height: parent.height
+                            verticalAlignment: Text.AlignVCenter
+                            horizontalAlignment: Text.AlignRight
+                            rightPadding: 8
+                            text: modelData.size || "—"
+                            font.pixelSize: theme.fontSmall
+                            color: row.sel ? flist.cream : flist.gold1
+                        }
+                        // Type
+                        Text {
+                            width: flist.cType; height: parent.height
+                            verticalAlignment: Text.AlignVCenter
+                            elide: Text.ElideRight
+                            text: modelData.type || ""
+                            font.pixelSize: theme.fontSmall
+                            color: row.sel ? flist.cream : flist.gold1
+                        }
+                        // Modified
+                        Text {
+                            width: flist.cMod; height: parent.height
+                            verticalAlignment: Text.AlignVCenter
+                            elide: Text.ElideRight
+                            text: modelData.modified || ""
+                            font.pixelSize: theme.fontSmall
+                            color: row.sel ? flist.cream : flist.gold1
+                        }
+                    }
+
+                    HoverHandler { id: rowHov }
+                    TapHandler {
+                        onTapped: {
+                            if (modelData.isDir) {
+                                flist.selectedFile = ""
+                                flist.openDir(modelData.path)
+                                flist.acted("open")
+                            } else {
+                                flist.selectedFile = modelData.path
+                                flist.pickFile(modelData.path)
+                                flist.acted("select")
+                            }
+                        }
+                    }
+                    TapHandler {
+                        acceptedButtons: Qt.RightButton
+                        onTapped: (eventPoint) => {
+                            var p = flist.mapFromItem(null, eventPoint.scenePosition.x, eventPoint.scenePosition.y)
+                            flist.openContextMenu(modelData.path, p.x, p.y)
+                        }
+                    }
+                }
+            }
+        }
+
+        FilePreview {
+            visible: flist.selectedFile !== ""
+            width: 240
+            height: parent.height
+            path: flist.selectedFile
+        }
+    }
+
+    component HeaderCell: Item {
+        property string field: ""
+        property string label: ""
+        readonly property bool active: flist.sortField === field
+        Rectangle {
+            anchors.fill: parent; anchors.margins: 1
+            color: active ? Qt.rgba(139/255,30/255,63/255,0.06) : "transparent"
+        }
+        Text {
+            anchors.fill: parent; leftPadding: 6
+            verticalAlignment: Text.AlignVCenter
+            text: label + (active ? (flist.sortAscending ? " ▲" : " ▼") : "")
+            font.family: theme.fontFamily; font.italic: settings.fontItalic; font.letterSpacing: theme.letterSpacing; font.pixelSize: theme.fontSmall
+            font.bold: active
+            color: active ? flist.burg4 : flist.gold1
+        }
+        TapHandler {
+            onTapped: {
+                if (flist.sortField === field)
+                    flist.sortChanged(field, !flist.sortAscending)
+                else
+                    flist.sortChanged(field, true)
+            }
+        }
+    }
+
+    function glyph(kind) {
+        if (kind === "img")   return "▣"
+        if (kind === "music") return "♪"
+        if (kind === "video") return "▶"
+        return "▤"
+    }
+
+    // dismiss layer — left-click outside menu closes it
+    Item {
+        anchors.fill: parent
+        visible: listCtxMenu.visible
+        z: 1999
+        TapHandler { acceptedButtons: Qt.LeftButton; onTapped: flist.closeContextMenu() }
+    }
+
+    Rectangle {
+        id: listCtxMenu
+        visible: false; z: 2000
+        width: 140
+        height: listCtxCol.implicitHeight + 8
+        radius: 8
+        color: flist.cream
+        border.color: flist.goldDeep; border.width: 1
+
+        Rectangle {
+            anchors.fill: parent; anchors.topMargin: 2; anchors.leftMargin: 2
+            z: -1; radius: parent.radius; color: Qt.rgba(0, 0, 0, 0.28)
+        }
+
+        Column {
+            id: listCtxCol
+            x: 4; y: 4
+            width: parent.width - 8; spacing: 0
+
+            Item {
+                visible: flist.menuPath !== ""
+                width: parent.width; height: 28
+                Rectangle {
+                    anchors.fill: parent; radius: 6
+                    color: lCtxHov.hovered ? Qt.rgba(139/255, 30/255, 63/255, 0.85) : "transparent"
+                }
+                Rectangle {
+                    visible: lCtxHov.hovered
+                    anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom
+                    anchors.margins: 3; width: 2; radius: 1; color: flist.goldDeep
+                }
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.left: parent.left; anchors.leftMargin: 12
+                    text: "Move To…"
+                    color: lCtxHov.hovered ? ncde.surface : flist.menuInk
+                    font.family: theme.fontFamily; font.weight: settings.fontWeight; font.italic: settings.fontItalic; font.letterSpacing: theme.letterSpacing; font.pixelSize: theme.fontMedium
+                }
+                HoverHandler { id: lCtxHov }
+                TapHandler {
+                    onTapped: {
+                        var path = flist.menuPath
+                        flist.closeContextMenu()
+                        if (path !== "") flist.moveRequested(path)
+                    }
+                }
+            }
+
+            // 2026-07-07 UX pack — Rename / Cut / Copy / Toss (Thunar-class verbs)
+            Repeater {
+                model: [
+                    { label: "Rename…",     sig: "rename" },
+                    { label: "Cut",         sig: "cut" },
+                    { label: "Copy",        sig: "copy" },
+                    { label: "Toss to Bin", sig: "toss" },
+                    { label: "Paste",       sig: "paste" }
+                ]
+                Item {
+                    visible: modelData.sig === "paste" ? flist.canPaste : flist.menuPath !== ""
+                    width: parent.width; height: 28
+                    Rectangle {
+                        anchors.fill: parent; radius: 6
+                        color: xCtxHov.hovered ? Qt.rgba(139/255, 30/255, 63/255, 0.85) : "transparent"
+                    }
+                    Rectangle {
+                        visible: xCtxHov.hovered
+                        anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom
+                        anchors.margins: 3; width: 2; radius: 1; color: flist.goldDeep
+                    }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.left: parent.left; anchors.leftMargin: 12
+                        text: modelData.sig === "paste" && flist.menuIsDir ? "Paste Into Folder" : modelData.label
+                        color: xCtxHov.hovered ? ncde.surface : flist.menuInk
+                        font.family: theme.fontFamily; font.weight: settings.fontWeight; font.italic: settings.fontItalic; font.letterSpacing: theme.letterSpacing; font.pixelSize: theme.fontMedium
+                    }
+                    HoverHandler { id: xCtxHov }
+                    TapHandler {
+                        onTapped: {
+                            var path = flist.menuPath
+                            var sig = modelData.sig
+                            var wasDir = flist.menuIsDir
+                            flist.closeContextMenu()
+                            if (sig === "paste") { flist.pasteRequested(wasDir ? path : flist.dirPath); return }
+                            if (path === "") return
+                            if (sig === "rename") flist.renameRequested(path)
+                            else if (sig === "cut")  flist.cutRequested(path)
+                            else if (sig === "copy") flist.copyRequested(path)
+                            else if (sig === "toss") flist.tossRequested(path)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

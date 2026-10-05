@@ -1,0 +1,9 @@
+   - `ncde-docs/ncde-architecture.md` — full NCDE component map (reverse-engineered: what NCDE *is*)
+   - `ncde-docs/ncde-completeness-audit.md` — file-level present-vs-MISSING gate (anti-"left out")
+   - `ncde-docs/build-the-missing.md` — install-vs-build plan for the missing runtime deps
+   - `ncde-docs/NCDE-LELAN-PLAN.md` — rebuild Lelan (the nervous system)
+     (deep specs: ncde-docs/{lelan,kickass-guard,zen,anim-policy,missing}.md + lelan-references.txt)
+
+   **Completeness gate (binding):** before any squashfs build, re-run the file-level checks in
+   `ncde-docs/ncde-completeness-audit.md` — every ❌ → ✅, verified at the FILE level (NOT the pacman
+   DB, NOT handoff notes). ~18 builds shipped broken from trusting the DB / notes instead of the tree.

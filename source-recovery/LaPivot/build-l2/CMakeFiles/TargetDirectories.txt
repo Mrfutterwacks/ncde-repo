@@ -1,0 +1,9 @@
+/run/media/stephen/NCDE-BACKUP/my-project/source-recovery/LaPivot/build-l2/CMakeFiles/LaPivot.dir
+/run/media/stephen/NCDE-BACKUP/my-project/source-recovery/LaPivot/build-l2/CMakeFiles/edit_cache.dir
+/run/media/stephen/NCDE-BACKUP/my-project/source-recovery/LaPivot/build-l2/CMakeFiles/rebuild_cache.dir
+/run/media/stephen/NCDE-BACKUP/my-project/source-recovery/LaPivot/build-l2/CMakeFiles/list_install_components.dir
+/run/media/stephen/NCDE-BACKUP/my-project/source-recovery/LaPivot/build-l2/CMakeFiles/install.dir
+/run/media/stephen/NCDE-BACKUP/my-project/source-recovery/LaPivot/build-l2/CMakeFiles/install/local.dir
+/run/media/stephen/NCDE-BACKUP/my-project/source-recovery/LaPivot/build-l2/CMakeFiles/install/strip.dir
+/run/media/stephen/NCDE-BACKUP/my-project/source-recovery/LaPivot/build-l2/CMakeFiles/LaPivot_autogen_timestamp_deps.dir
+/run/media/stephen/NCDE-BACKUP/my-project/source-recovery/LaPivot/build-l2/CMakeFiles/LaPivot_autogen.dir

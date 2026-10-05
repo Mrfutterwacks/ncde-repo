@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Binnie
+GenericName=Trash
+Comment=Manage deleted files
+Exec=/usr/local/bin/binnie
+Icon=user-trash
+Terminal=false
+Categories=Utility;System;
+Keywords=trash;bin;recycle;delete;
+StartupNotify=true

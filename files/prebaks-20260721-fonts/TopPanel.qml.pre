@@ -1,0 +1,332 @@
+import QtQuick 2.15
+import QtQuick.Controls 2.15
+import QtQuick.Effects 6.5
+
+Item {
+    id: topPanel
+
+    property Item wallpaperSource: null
+    property Item appMenuTarget: null
+    property Item settingsPanelTarget: null
+    property Item menuLayer: null
+    property Item ledgerTarget: null
+
+    property var _surfaceGlass: null
+    Component.onCompleted: {
+        _surfaceGlass = typeof ncde.surfaceGlass === "function" ? ncde.surfaceGlass("topPanel") : null
+    }
+    Connections {
+        target: ncde
+        function onThemeChanged() {
+            topPanel._surfaceGlass = typeof ncde.surfaceGlass === "function" ? ncde.surfaceGlass("topPanel") : null
+        }
+    }
+
+    // ── Intellihide reveal strip ───────────────────────────────
+    Item {
+        id: topPanelRevealStrip; x: 0; y: 0; width: parent.width; height: 4; z: 601
+        HoverHandler { onHoveredChanged: { intellihide.topHovered = hovered; if (hovered) intellihide.revealAll() } }
+    }
+
+    // GliaDropMenu (File/Applications/Places/etc.) is a top-level overlay positioned
+    // ONCE at open-time relative to the GliaBar title button — it does not track the
+    // panel afterward. Without this, when the panel auto-hides mid-menu the dropdown
+    // stays rendered at its last screen position while the panel (and the button it's
+    // anchored to) slides out from under it, leaving it visually detached/orphaned.
+    // powerMenu/volumePopup ARE parented to the panel (they move with its y), but
+    // nothing ever closed them on hide either — they'd stay open and slide off-screen
+    // together with the panel instead of dismissing, same reported symptom.
+    Connections {
+        target: intellihide
+        function onTopRevealedChanged() {
+            if (!intellihide.topRevealed) {
+                topGliaBar.close()
+                powerMenu.visible = false
+                volumePopup.visible = false
+            }
+        }
+    }
+
+    // Top panel underglow
+    Rectangle {
+        anchors.top: topPanel.bottom
+        anchors.left: parent.left; anchors.leftMargin: 6
+        anchors.right: parent.right; anchors.rightMargin: 6
+        height: 14; z: 499
+        gradient: Gradient { orientation: Gradient.Vertical
+            GradientStop { position: 0.0; color: Qt.rgba(ncde.glow.r, ncde.glow.g, ncde.glow.b, 0.35) }
+            GradientStop { position: 1.0; color: Qt.rgba(ncde.glow.r, ncde.glow.g, ncde.glow.b, 0.0) } }
+    }
+
+    y: intellihide.topRevealed ? 6 : -(height + 10)
+    anchors.left: parent.left; anchors.leftMargin: 6
+    anchors.right: parent.right; anchors.rightMargin: 6
+    height: 28; z: 500
+    Behavior on y { NumberAnimation { duration: 220; easing.type: Easing.OutExpo } }
+    HoverHandler {
+        onHoveredChanged: {
+            intellihide.topHovered = hovered
+            if (hovered) intellihide.revealAll()
+            else intellihide.scheduleHide()
+        }
+    }
+
+    // ── Aero glass pill ────────────────────────────────────────
+    NCDEGlassSurface {
+        anchors.fill: parent
+        backgroundSource: topPanel.wallpaperSource
+        specularInset: 0.0
+        revealPulse: intellihide.topRevealed
+        glintPulse: intellihide.glintPulse
+        tint: {
+            if (!ncde.presetActive) {
+                var g = topPanel._surfaceGlass
+                if (g && g["tint"] !== undefined) { var c = Qt.color(g["tint"]); return Qt.rgba(c.r, c.g, c.b, g["shine"] !== undefined ? g["shine"] * 0.36 : 0.18) }
+            }
+            return Qt.rgba(ncde.accent.r, ncde.accent.g, ncde.accent.b, 0.18)
+        }
+        glowA: topPanel._surfaceGlass && topPanel._surfaceGlass["glow"] !== undefined ? topPanel._surfaceGlass["glow"] : 0.70
+        edge: {
+            if (!ncde.presetActive) {
+                var g = topPanel._surfaceGlass
+                if (g && g["border"] !== undefined) { var c = Qt.color(g["border"]); return Qt.rgba(c.r, c.g, c.b, 0.85) }
+            }
+            return Qt.rgba(ncde.glow.r, ncde.glow.g, ncde.glow.b, 0.85)
+        }
+        glowRim:  !ncde.presetActive && topPanel._surfaceGlass && topPanel._surfaceGlass["glowColor"] !== undefined ? Qt.color(topPanel._surfaceGlass["glowColor"]) : ncde.glow
+        glowHalo: !ncde.presetActive && topPanel._surfaceGlass && topPanel._surfaceGlass["glowColor"] !== undefined ? Qt.color(topPanel._surfaceGlass["glowColor"]) : ncde.glow
+    }
+
+    // ── Glia global menus + model ─────────────────────────────
+    GliaGlobalMenus {
+        id: gliaGlobals
+        onSettings:   if (topPanel.settingsPanelTarget) topPanel.settingsPanelTarget.visible = !topPanel.settingsPanelTarget.visible
+        onSettingsSection: function(label) {
+            var p = topPanel.settingsPanelTarget
+            if (!p) return
+            if (typeof p.openSection === "function") p.openSection(label)
+            else p.visible = true
+        }
+        onHelp:       handbook.show()
+        onRunCommand: if (topPanel.appMenuTarget) topPanel.appMenuTarget.visible = !topPanel.appMenuTarget.visible
+    }
+
+    GliaMenuModel {
+        id: topMenuModel
+        mode: "static"
+        staticMenus: gliaGlobals.menus
+    }
+
+    // GliaTalk v1: feed the focused app's published menus into Glia's bar.
+    Connections {
+        target: (typeof windowMgr !== "undefined" && windowMgr) ? windowMgr : null
+        function onActiveAppMenusChanged() { gliaGlobals.setAppMenusJson(windowMgr.activeAppMenus) }
+        function onActiveIndexChanged()    { gliaGlobals.setAppMenusJson(windowMgr.activeAppMenus) }
+    }
+
+    Connections {
+        target: topMenuModel
+        function onActionInvoked(actionId) { gliaGlobals.route(actionId) }
+    }
+
+    GliaDocPopup  { id: gliaDoc }
+    NCDEHandbook  { id: handbook }
+    Connections {
+        target: topGliaBar
+        function onDocRequested(doc) {
+            if (doc === "handbook") handbook.show()
+            else gliaDoc.show(doc)
+        }
+    }
+    Connections { target: gliaGlobals; function onAbout() { gliaDoc.show("about-ncde") } }
+
+    // Left: NCDE logo + global menu bar + active window title
+    Row {
+        anchors.left: parent.left; anchors.leftMargin: 12
+        anchors.top: parent.top; anchors.bottom: parent.bottom; spacing: 8
+
+        MuchaIcon {
+            width: 24; height: 24
+            anchors.verticalCenter: parent.verticalCenter
+            size: 24
+            appName: "bfbpanel"
+            accentColor: ncde.accent
+            glowColor:   ncde.glow
+            TapHandler { onTapped: topGliaBar.toggle() }
+        }
+
+        GliaBar {
+            id: topGliaBar
+            anchors.verticalCenter: parent.verticalCenter
+            menuModel: topMenuModel
+            collapsible: true
+            openUpward: false
+            menuLayer: topPanel.menuLayer
+        }
+
+    }
+
+    // Center: clock
+    Row {
+        id: panelClock
+        anchors.centerIn: parent; spacing: 2
+        Text { text: widget_data.timeHour; color: settings.topPanelTextColor !== "" ? settings.topPanelTextColor : ncde.gilt4; font.pixelSize: theme.fontLarge; font.bold: true; font.family: theme.fontFamily; anchors.verticalCenter: parent.verticalCenter }
+        Text { text: ":"; color: settings.topPanelTextColor !== "" ? settings.topPanelTextColor : ncde.gilt4; font.pixelSize: theme.fontLarge; font.bold: true; font.family: theme.fontFamily; anchors.verticalCenter: parent.verticalCenter
+               opacity: widget_data.colonOn ? 1.0 : 0.2; Behavior on opacity { NumberAnimation { duration: 100 } } }
+        Text { text: widget_data.timeMinute; color: settings.topPanelTextColor !== "" ? settings.topPanelTextColor : ncde.gilt4; font.pixelSize: theme.fontLarge; font.bold: true; font.family: theme.fontFamily; anchors.verticalCenter: parent.verticalCenter }
+        Text { text: widget_data.timeAMPM; color: settings.topPanelTextColor !== "" ? settings.topPanelTextColor : ncde.gilt4; font.pixelSize: theme.fontSmall; font.family: theme.fontFamily; anchors.verticalCenter: parent.verticalCenter; leftPadding: 3 }
+
+        TapHandler { onTapped: clockCalPopup.visible = !clockCalPopup.visible }
+    }
+
+    // Leap Frog Ledger clock drop-down (Ledger's own month+agenda pop-out)
+    ClockCalendarPopup {
+        id: clockCalPopup
+        visible: false
+        anchors.horizontalCenter: panelClock.horizontalCenter
+        anchors.top: parent.bottom; anchors.topMargin: 2
+        z: 700
+        onCloseRequested: visible = false
+        onOpenFull: { visible = false; if (topPanel.ledgerTarget) topPanel.ledgerTarget.openFull() }
+    }
+
+    // Right: tray
+    Row {
+        anchors.right: parent.right; anchors.rightMargin: 10; anchors.verticalCenter: parent.verticalCenter; spacing: 8
+        NCDEIcon { size: 16; type: widget_data.networkUp ? "network-up" : "network-down"; accentColor: ncde.accent; glowColor: ncde.glow; bgColor: ncde.panelBg; textColor: ncde.gilt4; anchors.verticalCenter: parent.verticalCenter }
+        Rectangle { width: 1; height: 16; color: ncde.accentMuted; anchors.verticalCenter: parent.verticalCenter }
+        Row {
+            spacing: 3; anchors.verticalCenter: parent.verticalCenter
+            NCDEIcon { size: 14; type: widget_data.muted ? "volume-muted" : widget_data.volume > 50 ? "volume-high" : "volume-low"
+                accentColor: ncde.accent; glowColor: ncde.glow; bgColor: ncde.panelBg; textColor: ncde.gilt4; anchors.verticalCenter: parent.verticalCenter
+                TapHandler { onTapped: widget_data.toggleMute() } }
+            Text {
+                text: widget_data.muted ? "—" : widget_data.volume+"%"
+                color: settings.topPanelTextColor !== "" ? settings.topPanelTextColor : ncde.gilt4
+                // Fixed size (operator, 2026-07-15): the top-panel tray is a status
+                // strip, not document text -- Fonts tab scale must never resize it,
+                // same as the NCDEIcon glyphs it sits next to (16/14px, always fixed).
+                font.pixelSize: 12; font.family: theme.fontFamily; anchors.verticalCenter: parent.verticalCenter
+                style: theme.textStyle; styleColor: theme.textStyleColor
+                layer.enabled: theme.textShadowEnabled
+                layer.effect: MultiEffect { shadowEnabled: true; shadowColor: theme.textShadowColor
+                    shadowBlur: theme.textShadowRadius / 32.0
+                    shadowHorizontalOffset: theme.textShadowOffsetX; shadowVerticalOffset: theme.textShadowOffsetY }
+                TapHandler { onTapped: volumePopup.visible = !volumePopup.visible }
+            }
+        }
+        Rectangle { width: 1; height: 16; color: ncde.accentMuted; anchors.verticalCenter: parent.verticalCenter }
+        Text {
+            // Fixed size (operator, 2026-07-15): tray status icon, not document text --
+            // see the volume-% note above, same reasoning applies to gear/power.
+            text: "⚙"; color: settings.topPanelTextColor !== "" ? settings.topPanelTextColor : ncde.gilt4; font.pixelSize: 16; anchors.verticalCenter: parent.verticalCenter
+            style: theme.textStyle; styleColor: theme.textStyleColor
+            layer.enabled: theme.textShadowEnabled
+            layer.effect: MultiEffect { shadowEnabled: true; shadowColor: theme.textShadowColor
+                shadowBlur: theme.textShadowRadius / 32.0
+                shadowHorizontalOffset: theme.textShadowOffsetX; shadowVerticalOffset: theme.textShadowOffsetY }
+            TapHandler { onTapped: if (topPanel.settingsPanelTarget) topPanel.settingsPanelTarget.visible = !topPanel.settingsPanelTarget.visible }
+        }
+        Rectangle { visible: widget_data.hasBattery; width: 1; height: 16; color: ncde.accentMuted; anchors.verticalCenter: parent.verticalCenter }
+        Row {
+            visible: widget_data.hasBattery
+            spacing: 3; anchors.verticalCenter: parent.verticalCenter
+            NCDEIcon {
+                size: 14
+                type: widget_data.batteryCharging ? "battery-charging"
+                    : widget_data.batteryLevel >= 80 ? "battery-full"
+                    : widget_data.batteryLevel >= 50 ? "battery-high"
+                    : widget_data.batteryLevel >= 20 ? "battery-mid"
+                    : "battery-low"
+                accentColor: ncde.accent; glowColor: ncde.glow; bgColor: ncde.panelBg; textColor: ncde.gilt4
+                anchors.verticalCenter: parent.verticalCenter
+            }
+            Text {
+                visible: settings.showBatteryPct
+                text: widget_data.batteryLevel + "%"
+                color: settings.topPanelTextColor !== "" ? settings.topPanelTextColor : ncde.gilt4
+                // Fixed size (operator, 2026-07-15): see the volume-% note above.
+                font.pixelSize: 12; font.family: theme.fontFamily; anchors.verticalCenter: parent.verticalCenter
+                style: theme.textStyle; styleColor: theme.textStyleColor
+                layer.enabled: theme.textShadowEnabled
+                layer.effect: MultiEffect { shadowEnabled: true; shadowColor: theme.textShadowColor
+                    shadowBlur: theme.textShadowRadius / 32.0
+                    shadowHorizontalOffset: theme.textShadowOffsetX; shadowVerticalOffset: theme.textShadowOffsetY }
+            }
+        }
+        Rectangle { width: 1; height: 16; color: ncde.accentMuted; anchors.verticalCenter: parent.verticalCenter }
+        Item { id: pwrBtn; width: 28; height: parent.height; anchors.verticalCenter: parent.verticalCenter
+            property bool hov: false
+            Rectangle { anchors.fill: parent; radius: 3
+                color: pwrBtn.hov ? Qt.rgba(ncde.accent.r,ncde.accent.g,ncde.accent.b,0.15) : "transparent" }
+            Text {
+                // Fixed size (operator, 2026-07-15): see the volume-% note above.
+                text: "⏻"; color: pwrBtn.hov ? ncde.accent : (settings.topPanelTextColor !== "" ? settings.topPanelTextColor : ncde.gilt4); font.pixelSize: 16; anchors.centerIn: parent
+                style: theme.textStyle; styleColor: theme.textStyleColor
+                layer.enabled: theme.textShadowEnabled
+                layer.effect: MultiEffect { shadowEnabled: true; shadowColor: theme.textShadowColor
+                    shadowBlur: theme.textShadowRadius / 32.0
+                    shadowHorizontalOffset: theme.textShadowOffsetX; shadowVerticalOffset: theme.textShadowOffsetY }
+            }
+            HoverHandler { onHoveredChanged: pwrBtn.hov = hovered }
+            TapHandler { onTapped: powerMenu.visible = !powerMenu.visible }
+        }
+    }
+
+    // Volume popup
+    Rectangle {
+        id: volumePopup; visible: false
+        onVisibleChanged: { if (!visible && !powerMenu.visible) intellihide.scheduleHide() }
+        anchors.right: parent.right; anchors.rightMargin: 8; anchors.top: parent.bottom; anchors.topMargin: 2
+        width: 220; height: 64; z: 700; radius: 8; color: ncde.popupBg; border.color: ncde.border; border.width: 1
+        Column { anchors { fill: parent; margins: 10 }
+        spacing: 6
+            Row { width: parent.width
+                Text { text: "VOL"; color: ncde.accent; font.pixelSize: theme.fontSmall; font.family: "TerminalVector"; width: 30 }
+                Slider { id: volSlider; width: parent.width-60; height: 20; from: 0; to: 150
+                    Component.onCompleted: value = widget_data.volume
+                    Connections { target: widget_data
+                        // REVERTED 2026-07-13: an earlier pass here claimed widget_data
+                        // has no changed() signal and rewrote this to onTrayChanged —
+                        // WRONG on inspection of the live binary's own moc signal list
+                        // (WidgetData: changed, clockChanged, statsChanged, weatherChanged,
+                        // moonPositionChanged, mediaChanged, mediaPositionChanged — NO
+                        // trayChanged at all; that belongs to a different class). changed()
+                        // is real; restored to the original, verified-correct handler.
+                        function onChanged() { if (!volSlider.pressed) volSlider.value = widget_data.volume }
+                    }
+                    onMoved: widget_data.setVolume(Math.round(value))
+                    background: Rectangle { height:3;radius:2;color:Qt.rgba(ncde.border.r,ncde.border.g,ncde.border.b,0.5); Rectangle{width:parent.width*parent.parent.visualPosition;height:parent.height;radius:parent.radius;color:ncde.accent} }
+                    handle: Rectangle { x:parent.leftPadding+parent.visualPosition*(parent.availableWidth-width); y:parent.topPadding+parent.availableHeight/2-height/2; width:10;height:10;radius:5;color:ncde.accent } }
+                Text { text: widget_data.volume+"%"; color: ncde.border; font.pixelSize:theme.fontSmall; font.family:"TerminalVector"; width:30; horizontalAlignment:Text.AlignRight } } }
+    }
+
+    // Power menu
+    Rectangle {
+        id: powerMenu; visible: false
+        onVisibleChanged: {
+            if (!visible && !volumePopup.visible) intellihide.scheduleHide()
+        }
+        anchors.right: parent.right; anchors.rightMargin: 8; anchors.top: parent.bottom; anchors.topMargin: 2
+        width: 160; z: 1200; height: powerMenuCol.implicitHeight+12; color: ncde.popupBg; border.color: ncde.border; border.width:1; radius:8
+        Column { id: powerMenuCol; anchors { top:parent.top;left:parent.left;right:parent.right;margins:6 }
+        spacing:2
+            Repeater { model: [{label:"Lock Screen",action:"lock"},{label:"Log Out",action:"logout"},{label:"Reboot",action:"reboot"},{label:"Power Off",action:"poweroff"}]
+                Rectangle { width:parent.width;height:28;radius:4
+                    color:pmH.hovered?Qt.rgba(ncde.accent.r,ncde.accent.g,ncde.accent.b,0.12):"transparent"
+                    Behavior on color{ColorAnimation{duration:80}}
+                    HoverHandler{id:pmH}
+                    Text {
+                        anchors.left: parent.left; anchors.leftMargin: 10; anchors.verticalCenter: parent.verticalCenter
+                        text: modelData.label; color: pmH.hovered ? ncde.accent : theme.textColor
+                        font.pixelSize: theme.fontSmall; font.family: settings.fontFamily || "Noto Sans"
+                        style: theme.textStyle; styleColor: theme.textStyleColor
+                        layer.enabled: theme.textShadowEnabled
+                        layer.effect: MultiEffect { shadowEnabled: true; shadowColor: theme.textShadowColor
+                            shadowBlur: theme.textShadowRadius / 32.0
+                            shadowHorizontalOffset: theme.textShadowOffsetX; shadowVerticalOffset: theme.textShadowOffsetY }
+                        Behavior on color { ColorAnimation { duration: 80 } }
+                    }
+                    TapHandler{onTapped:{powerMenu.visible=false;var a=modelData.action;if(a==="logout"){launcher.logout()}else if(a==="lock")launcher.systemCommand("ncde-portal --lock");else if(a==="reboot")launcher.systemCommand("systemctl reboot");else if(a==="poweroff")launcher.systemCommand("systemctl poweroff")}} } } }
+    }
+}

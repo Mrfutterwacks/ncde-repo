@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Magpie Talker
+GenericName=Messenger
+Comment=Peer-to-peer messaging
+Exec=/usr/local/bin/magpie-talker
+Icon=internet-group-chat
+Terminal=false
+Categories=Network;InstantMessaging;
+Keywords=chat;message;talk;messenger;
+StartupNotify=true

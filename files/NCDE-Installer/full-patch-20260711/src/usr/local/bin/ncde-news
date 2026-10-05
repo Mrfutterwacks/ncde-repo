@@ -1,0 +1,330 @@
+#!/usr/bin/env python3
+# ncde-news — NCDE free news-headline notifier (userspace, no binary changes).
+#
+# WHAT: On a slow timer (default ~2x/day, DEFAULT OFF), fetch NPR's free public
+# RSS top-stories feed, take the top item (title + link), and raise a NATIVE
+# freedesktop notification carrying a "default" action. When that notification is
+# activated (ActionInvoked fires for our id), open the article in ncde-chromium
+# (xdg-open fallback). It rides the SAME native notification server that the NCDE
+# notify companion provides (org.freedesktop.Notifications) — no new UI, nothing
+# near LaPivot/ncde-portal/logind.
+#
+# WHY THIS SHAPE ("sender owns the click"): NCDE's stripped toast is dismiss-only
+# and exposes no body-click signal, and we may not touch the WM/QML to add one.
+# So the robust design is: this helper is the SENDER, and it OWNS the click — it
+# subscribes to ActionInvoked on the bus and, for its own notification ids, opens
+# the link. The companion advertises "actions" and relays ActionInvoked; this
+# process turns that into an opened article. If a live session ever routes a real
+# toast click into ActionInvoked, this Just Works with no change here.
+#
+# OPT-IN (default OFF, three ways, any one enables it):
+#   * env   NCDE_NEWS_ENABLE=1            (e.g. in ~/.config/ncde/news.env)
+#   * file  ~/.config/ncde/news.conf  ->  enabled = true
+#   * the systemd user unit is shipped DISABLED; `--enable` it to opt in.
+# If not enabled, this process prints a one-line hint and exits 0 (no loop, no
+# network, no notifications).
+#
+# TUNABLES (env overrides file overrides default):
+#   NCDE_NEWS_ENABLE     0/1 (default 0)          enable at all
+#   NCDE_NEWS_INTERVAL   seconds  (default 43200) ~2x/day cadence
+#   NCDE_NEWS_FEED       RSS url  (default NPR 1001 top stories)
+#   NCDE_NEWS_STARTDELAY seconds  (default 20)    first fetch after start
+#   NCDE_NEWS_TIMEOUT    ms       (default -1)    notification expire (-1 = server default)
+#   NCDE_CHROMIUM        path     (default /usr/local/bin/ncde-chromium)
+#
+# SAFETY: every network/parse/D-Bus/launch step is wrapped. A failure logs (only
+# when NCDE_NEWS_DEBUG=1) and is skipped — the process never crashes and never
+# spams (it will not re-notify the same article link twice in a row).
+
+import os
+import sys
+import ssl
+import json
+import time
+import shutil
+import signal
+import socket
+import subprocess
+import urllib.request
+import urllib.error
+import xml.etree.ElementTree as ET
+
+APP_NAME = "NCDE News"
+
+
+def send_via_local_socket(title, body, expire):
+    """NCSession-style carrier: ncde-notify.so (injected into LaPivot) listens on
+    $XDG_RUNTIME_DIR/ncde-notify.sock and forwards straight to the real native
+    toast, independent of org.freedesktop.Notifications ever being claimed on the
+    session D-Bus. Returns True on a successful hand-off (fire-and-forget; no
+    notification id, so ActionInvoked/click-to-open still rides the D-Bus path
+    only, same known gap as before). Never raises — caller falls back to D-Bus."""
+    runtime = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
+    path = os.path.join(runtime, "ncde-notify.sock")
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(2.0)
+            s.connect(path)
+            payload = json.dumps({
+                "category": "notification",
+                "app_name": APP_NAME,
+                "summary": title,
+                "body": body,
+                "icon": "emblem-web",
+                "timeout": expire,
+            })
+            s.sendall(payload.encode("utf-8"))
+            s.shutdown(socket.SHUT_WR)
+        return True
+    except Exception as e:
+        log("local socket send failed (%s): %r" % (path, e))
+        return False
+DEFAULT_FEED = "https://feeds.npr.org/1001/rss.xml"
+CONF = os.path.join(
+    os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
+    "ncde", "news.conf",
+)
+
+
+# --------------------------------------------------------------------- logging
+def dbg_on():
+    return os.environ.get("NCDE_NEWS_DEBUG", "") not in ("", "0", "false", "no")
+
+
+def log(msg):
+    if dbg_on():
+        sys.stderr.write("[ncde-news] %s\n" % msg)
+        sys.stderr.flush()
+
+
+# --------------------------------------------------------------- configuration
+def _truthy(v):
+    return str(v).strip().lower() in ("1", "true", "yes", "on")
+
+
+def read_conf():
+    """Parse the tiny key=value news.conf if present. Never raises."""
+    cfg = {}
+    try:
+        with open(CONF, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, _, v = line.partition("=")
+                cfg[k.strip().lower()] = v.strip()
+    except OSError:
+        pass
+    return cfg
+
+
+def setting(cfg, env_key, conf_key, default):
+    if env_key in os.environ and os.environ[env_key] != "":
+        return os.environ[env_key]
+    if conf_key in cfg:
+        return cfg[conf_key]
+    return default
+
+
+def is_enabled(cfg):
+    return _truthy(setting(cfg, "NCDE_NEWS_ENABLE", "enabled", "0"))
+
+
+# --------------------------------------------------------------------- fetch
+def fetch_top_item(feed_url):
+    """Return (title, link) of the top RSS item, or None on any failure."""
+    try:
+        ctx = ssl.create_default_context()
+        req = urllib.request.Request(
+            feed_url, headers={"User-Agent": "NCDE-News/1.0 (+local)"}
+        )
+        with urllib.request.urlopen(req, timeout=15, context=ctx) as r:
+            raw = r.read()
+    except (urllib.error.URLError, ValueError, OSError, TimeoutError) as e:
+        log("fetch failed: %r" % (e,))
+        return None
+    except Exception as e:  # defensive: never let a fetch kill the loop
+        log("fetch unexpected: %r" % (e,))
+        return None
+
+    try:
+        root = ET.fromstring(raw)
+        item = root.find("./channel/item")
+        if item is None:
+            log("parse: no <item> in feed")
+            return None
+        te = item.find("title")
+        le = item.find("link")
+        title = (te.text or "").strip() if te is not None else ""
+        link = (le.text or "").strip() if le is not None else ""
+        if not title or not link:
+            log("parse: item missing title/link")
+            return None
+        return (title, link)
+    except ET.ParseError as e:
+        log("parse failed: %r" % (e,))
+        return None
+    except Exception as e:
+        log("parse unexpected: %r" % (e,))
+        return None
+
+
+# --------------------------------------------------------------- open article
+def open_article(url):
+    """Open url in ncde-chromium, else xdg-open. Detached; never raises."""
+    if not url:
+        return
+    chromium = os.environ.get("NCDE_CHROMIUM", "/usr/local/bin/ncde-chromium")
+    candidates = []
+    if os.path.exists(chromium):
+        candidates.append([chromium, url])
+    xdg = shutil.which("xdg-open")
+    if xdg:
+        candidates.append([xdg, url])
+    for cmd in candidates:
+        try:
+            subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            log("opened %s via %s" % (url, cmd[0]))
+            return
+        except Exception as e:
+            log("open via %s failed: %r" % (cmd[0], e))
+    log("no launcher succeeded for %s" % url)
+
+
+# --------------------------------------------------------------------- main
+def main():
+    cfg = read_conf()
+
+    if not is_enabled(cfg):
+        sys.stderr.write(
+            "[ncde-news] disabled (opt-in required). Enable with any of:\n"
+            "  NCDE_NEWS_ENABLE=1  (env, e.g. ~/.config/ncde/news.env)\n"
+            "  echo 'enabled = true' >> %s\n"
+            "  systemctl --user enable --now ncde-news.service\n" % CONF
+        )
+        return 0
+
+    # Only import the D-Bus/GLib stack once we know we are actually running, so a
+    # disabled install has zero runtime dependencies to satisfy.
+    try:
+        import dbus
+        from dbus.mainloop.glib import DBusGMainLoop
+        from gi.repository import GLib
+    except Exception as e:
+        sys.stderr.write("[ncde-news] missing python-dbus/python-gobject: %r\n" % e)
+        return 1
+
+    interval = max(300, int(float(setting(cfg, "NCDE_NEWS_INTERVAL", "interval", "43200"))))
+    start_delay = max(1, int(float(setting(cfg, "NCDE_NEWS_STARTDELAY", "startdelay", "20"))))
+    feed = setting(cfg, "NCDE_NEWS_FEED", "feed", DEFAULT_FEED)
+    expire = int(float(setting(cfg, "NCDE_NEWS_TIMEOUT", "timeout", "-1")))
+
+    DBusGMainLoop(set_as_default=True)
+    state = {"ids": {}, "last_link": None}  # notif-id -> link ; dedupe guard
+
+    def get_iface():
+        """Fresh proxy each use so a server restart cannot wedge us."""
+        bus = dbus.SessionBus()
+        obj = bus.get_object(
+            "org.freedesktop.Notifications", "/org/freedesktop/Notifications"
+        )
+        return bus, dbus.Interface(obj, "org.freedesktop.Notifications")
+
+    def on_action(nid, key):
+        try:
+            nid = int(nid)
+            link = state["ids"].get(nid)
+            log("ActionInvoked(id=%s, key=%s) link=%s" % (nid, key, link))
+            if link:
+                open_article(link)
+                state["ids"].pop(nid, None)
+        except Exception as e:
+            log("on_action error: %r" % e)
+
+    def on_closed(nid, reason):
+        try:
+            state["ids"].pop(int(nid), None)
+        except Exception:
+            pass
+
+    # Subscribe on the bus (main-loop delivery). Guarded.
+    try:
+        sub_bus = dbus.SessionBus()
+        sub_bus.add_signal_receiver(
+            on_action, signal_name="ActionInvoked",
+            dbus_interface="org.freedesktop.Notifications",
+        )
+        sub_bus.add_signal_receiver(
+            on_closed, signal_name="NotificationClosed",
+            dbus_interface="org.freedesktop.Notifications",
+        )
+    except Exception as e:
+        sys.stderr.write("[ncde-news] cannot connect to session bus: %r\n" % e)
+        return 1
+
+    def tick():
+        try:
+            item = fetch_top_item(feed)
+            if not item:
+                return True  # keep the timer; try again next cycle
+            title, link = item
+            if link == state["last_link"]:
+                log("top story unchanged; not re-notifying")
+                return True
+            # Primary carrier: the local NCSession socket ncde-notify.so listens
+            # on, independent of org.freedesktop.Notifications ever being
+            # claimed. No notification id comes back (fire-and-forget), so
+            # click-to-open still can't ride this path — same known gap as
+            # before — but the banner actually appears, which the D-Bus path
+            # alone has never once managed to do.
+            if send_via_local_socket(title, "NPR — click to read", expire):
+                state["last_link"] = link
+                log("notified via local socket: %s" % title)
+                return True
+            try:
+                _bus, iface = get_iface()
+                nid = int(iface.Notify(
+                    APP_NAME, dbus.UInt32(0), "emblem-web",
+                    title, "NPR — click to read",
+                    dbus.Array(["default", "Read article"], signature="s"),
+                    dbus.Dictionary({"urgency": dbus.Byte(1)}, signature="sv"),
+                    expire,
+                ))
+                state["ids"][nid] = link
+                state["last_link"] = link
+                log("notified via D-Bus id=%s: %s" % (nid, title))
+            except Exception as e:
+                log("Notify failed (server not up yet?): %r" % e)
+        except Exception as e:
+            log("tick error: %r" % e)
+        return True  # repeat forever
+
+    loop = GLib.MainLoop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, sig, lambda *_: loop.quit() or False)
+        except Exception:
+            pass
+
+    def startup():
+        tick()
+        return False  # one-shot; the interval timer below carries the cadence
+
+    GLib.timeout_add_seconds(start_delay, startup)       # first fetch shortly after start
+    GLib.timeout_add_seconds(interval, tick)             # then ~2x/day
+    log("running: feed=%s interval=%ss start_delay=%ss" % (feed, interval, start_delay))
+    try:
+        loop.run()
+    except Exception as e:
+        log("loop error: %r" % e)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

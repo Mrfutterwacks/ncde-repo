@@ -1,0 +1,8 @@
+# SniWatcher interface additions (not in oracle metaobject)
+# These are QObject meta-object additions (Q_PROPERTY, signals, slots, Q_INVOKABLE)
+# Plain C++ methods don't appear in the metaobject dump and shouldn't be listed here
+# oracle metaobject has: itemRegistered/itemUnregistered/hostChanged/itemsChanged signals,
+# onOwnerLeft private slot
+
+# No metaobject additions needed - oracle interface is complete for QML binding
+# ownsWatcherName() and hostServiceName() are plain C++ methods, not QML-visible

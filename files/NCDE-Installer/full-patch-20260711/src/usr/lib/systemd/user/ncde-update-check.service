@@ -1,0 +1,6 @@
+[Unit]
+Description=Check whether NCDE has updates
+
+[Service]
+Type=exec
+ExecStart=/usr/lib/ncde-update/ncde-update-check

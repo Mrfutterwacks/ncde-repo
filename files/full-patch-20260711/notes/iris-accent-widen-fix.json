@@ -1,0 +1,37 @@
+[
+  {
+    "id": "ironappetite",
+    "old": "#b33c1c",
+    "new": "#b31b10"
+  },
+  {
+    "id": "voidcarto",
+    "old": "#4a6ff0",
+    "new": "#2d71d6"
+  },
+  {
+    "id": "revelsend",
+    "old": "#855fa6",
+    "new": "#9654b2"
+  },
+  {
+    "id": "sirensveil",
+    "old": "#c967ac",
+    "new": "#d67bb9"
+  },
+  {
+    "id": "suncourt",
+    "old": "#a78004",
+    "new": "#744300"
+  },
+  {
+    "id": "inquisitorsl",
+    "old": "#d43a4d",
+    "new": "#e9495d"
+  },
+  {
+    "id": "ironfleet",
+    "old": "#657192",
+    "new": "#5e556b"
+  }
+]

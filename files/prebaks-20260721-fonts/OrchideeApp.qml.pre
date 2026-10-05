@@ -1,0 +1,1058 @@
+// OrchideeApp.qml — Orchidée, NCDE's file manager. Miller (Finder) column view
+// presided over by Glia, the fountain-pen governess, on her own little stage.
+//
+// Frameless PARCHMENT window with its own close jewel (no MotifFrame). A path
+// bar across the top; horizontally-scrolling columns below; a leaf preview pane
+// for files; Glia stands to the right and reacts to what you do. Deleting a file
+// drops it into the shared trash (Binnie's bin) with the 24h rewind window.
+//
+// Backend: `orchidee` (OrchideeFiles) lists dirs + trashes; `binnieTrash` is the
+// shared bin. Pure QtQuick primitives + TapHandler/HoverHandler.
+import QtQuick 2.15
+import QtQuick.Window 2.15
+
+Window {
+    id: app
+    width: 1040; height: 660
+    minimumWidth: 820; minimumHeight: 520
+    visible: true
+    color: "transparent"
+    title: "Orchidée"
+    flags: Qt.Window | Qt.FramelessWindowHint
+    Behavior on opacity { NumberAnimation { duration: 280 } }
+
+    property string assetBase: "qrc:/gliaanim/"
+
+    NCDEKit { id: k }
+
+    readonly property color gold:     k.gilt4
+    readonly property color goldSoft: Qt.rgba(k.gilt1.r, k.gilt1.g, k.gilt1.b, 0.25)
+    readonly property color goldDeep: k.gilt1
+    readonly property color burg2:    k.wine2
+    readonly property color burg4:    k.wine4
+    readonly property color ink:      k.ink
+    readonly property color gold1:    k.inkSoft
+    readonly property color cream:    k.surfaceHi
+
+    // the open chain of directories (column 0 = root). leaf file (if any) separate.
+    // startPath is injected by orchidee_main.cpp from argv[1] (empty when not given).
+    property var chain: (typeof startPath !== "undefined" && startPath !== "")
+                        ? [ orchidee.home, startPath ]
+                        : [ orchidee.home ]
+    property string leafFile: ""
+    property string leafDir:  ""
+    property string viewMode: "column"   // "column" | "grid" | "list"
+    property bool   binOpen: false       // Thunar-style: Binnie's bin browsed in place
+    onViewModeChanged: { leafFile = ""; leafDir = "" }
+    onChainChanged: viewMode = orchidee.loadViewMode(chain[chain.length - 1])
+    property string sortField:     "name"
+    property bool   sortAscending: true
+    property bool   sidebarOpen:   true
+    property bool   showHidden:    false   // Ctrl+H, Thunar model — all views follow
+
+    Shortcut {
+        sequence: "Ctrl+H"
+        onActivated: {
+            app.showHidden = !app.showHidden
+            glia.react("view")
+            bubble.show(app.pick(app.showHidden ? app.quips.hiddenOn : app.quips.hiddenOff))
+        }
+    }
+
+    // ── clipboard · undo · rename (2026-07-07 UX pack — Thunar-class verbs) ──
+    property string clipPath: ""
+    property bool   clipCut:  false
+    function doCut(p) {
+        if (!p) return
+        if (orchidee.isProtected(p)) { glia.react("point"); bubble.show(app.pick(app.quips.forbidden)); return }
+        clipPath = p; clipCut = true
+        glia.react("point"); bubble.show(app.pick(app.quips.clip))
+    }
+    function doCopy(p) {
+        if (!p) return
+        clipPath = p; clipCut = false
+        glia.react("point"); bubble.show(app.pick(app.quips.clip))
+    }
+    function doPaste() {
+        if (clipPath === "") { bubble.show("Nothing on the tray to set down, my dear."); return }
+        var dest = chain[chain.length - 1]
+        var ok = clipCut ? orchidee.moveTo(clipPath, dest)
+                         : (orchidee.copyTo(clipPath, dest) !== "")
+        if (ok) {
+            if (clipCut) { clipPath = ""; clipCut = false }
+            glia.react("move"); bubble.show(app.pick(app.quips.paste))
+        } else {
+            glia.react("point"); bubble.show(app.pick(app.quips.forbidden))
+        }
+    }
+    function doUndo() {
+        if (orchidee.undoLast()) {
+            chain = chain.slice()   // nudge the open views to re-read
+            glia.react("move"); bubble.show(app.pick(app.quips.undo))
+        } else {
+            bubble.show("Nothing to unwind, my dear.")
+        }
+    }
+    function doRename(p) {
+        if (!p) return
+        if (orchidee.isProtected(p)) { glia.react("point"); bubble.show(app.pick(app.quips.forbidden)); return }
+        renameVeil.open(p)
+    }
+    // Sovereign Seal (Ctrl+Alt+E): open = privileged file work goes through the
+    // house valet — polkit asks for the password, never Orchidée herself.
+    Shortcut {
+        sequence: "Ctrl+Alt+E"
+        onActivated: {
+            orchidee.sealOpen = !orchidee.sealOpen
+            glia.react(orchidee.sealOpen ? "point" : "approve")
+            bubble.show(app.pick(orchidee.sealOpen ? app.quips.sealOpen : app.quips.sealShut))
+        }
+    }
+    Shortcut { sequence: "Ctrl+Z"; onActivated: app.doUndo() }
+    Shortcut { sequence: "Delete"; onActivated: app.tossLeaf() }
+    Shortcut { sequence: "F2";     onActivated: app.doRename(app.leafFile) }
+    Shortcut { sequence: "Ctrl+X"; onActivated: app.doCut(app.leafFile) }
+    Shortcut { sequence: "Ctrl+C"; onActivated: app.doCopy(app.leafFile) }
+    Shortcut { sequence: "Ctrl+V"; onActivated: app.doPaste() }
+
+    function openDir(path, depth) {
+        var c = chain.slice(0, depth + 1);
+        c.push(path);
+        chain = c; leafFile = ""; leafDir = path;
+        if (contentLoader.item && typeof contentLoader.item.flickToEnd === "function")
+            contentLoader.item.flickToEnd()
+    }
+    function pickFile(path, depth) {
+        chain = chain.slice(0, depth + 1);   // collapse to this column
+        leafFile = path; leafDir = "";
+    }
+
+    // toss any path to the family bin (context menus) — no app fade
+    function tossPath(p) {
+        if (!p) return
+        if (orchidee.isProtected(p)) {
+            glia.react("point"); bubble.show(app.pick(app.quips.forbidden)); return
+        }
+        if (orchidee.trash(p)) {
+            if (leafFile === p) leafFile = ""
+            glia.react("delete"); bubble.show(app.pick(app.quips.danger))
+        } else {
+            glia.react("point"); bubble.show(app.pick(app.quips.forbidden))
+        }
+    }
+
+    // toss the picked leaf to the family bin — shared by the toolbar TOSS jewel
+    // and the GliaTalk menu; root-folder protection speaks through Glia.
+    function tossLeaf() {
+        if (leafFile === "") return
+        if (orchidee.isProtected(leafFile)) {
+            glia.react("point"); bubble.show(app.pick(app.quips.forbidden))
+            return
+        }
+        if (orchidee.trash(leafFile)) {
+            leafFile = ""
+            glia.react("delete"); bubble.show(app.pick(app.quips.danger))
+            fadeToBinnie.start()
+        } else {
+            glia.react("point"); bubble.show(app.pick(app.quips.forbidden))
+        }
+    }
+
+    // ── GliaTalk v1 (2026-07-07): Orchidée publishes her REAL menus to Glia's
+    //    top bar (X11 property, no dbus) and answers invokes with real verbs. ──
+    function publishGliaMenus() {
+        if (typeof gliaTalk === "undefined" || !gliaTalk) return
+        gliaTalk.attach(app)
+        gliaTalk.menusJson = JSON.stringify([
+            { title: "File", items: [
+                { label: "New Folder",   id: 101 },
+                { label: "Duplicate",    id: 102 },
+                { label: "Rename…",      shortcut: "F2", id: 105 },
+                { separator: true },
+                { label: "Toss to Bin",  shortcut: "Del", id: 103 },
+                { separator: true },
+                { label: "Close Window", id: 104 } ] },
+            { title: "Edit", items: [
+                { label: "Undo",         shortcut: "Ctrl+Z", id: 120 },
+                { separator: true },
+                { label: "Cut",          shortcut: "Ctrl+X", id: 121 },
+                { label: "Copy",         shortcut: "Ctrl+C", id: 122 },
+                { label: "Paste",        shortcut: "Ctrl+V", id: 123 } ] },
+            { title: "View", items: [
+                { label: "Column View",  id: 110 },
+                { label: "Grid View",    id: 111 },
+                { label: "List View",    id: 112 },
+                { separator: true },
+                { label: "Show Hidden Files", shortcut: "Ctrl+H", id: 113 },
+                { separator: true },
+                { label: "The Bin",      id: 114 } ] }
+        ])
+    }
+    function handleGliaMenu(id) {
+        var p = chain[chain.length - 1]
+        switch (id) {
+        case 101: orchidee.makeFolder(p, "New Folder"); glia.react("new"); bubble.show(app.pick(app.quips.create)); break
+        case 102: if (leafFile !== "") { orchidee.duplicate(leafFile); glia.react("duplicate"); bubble.show(app.pick(app.quips.create)) } break
+        case 103: tossLeaf(); break
+        case 104: app.close(); break
+        case 105: doRename(leafFile); break
+        case 120: doUndo(); break
+        case 121: doCut(leafFile); break
+        case 122: doCopy(leafFile); break
+        case 123: doPaste(); break
+        case 110: viewMode = "column"; orchidee.saveViewMode(p, "column"); glia.react("column"); break
+        case 111: viewMode = "grid";   orchidee.saveViewMode(p, "grid");   glia.react("grid");   break
+        case 112: viewMode = "list";   orchidee.saveViewMode(p, "list");   glia.react("list");   break
+        case 113: showHidden = !showHidden; glia.react("view")
+                  bubble.show(app.pick(showHidden ? app.quips.hiddenOn : app.quips.hiddenOff)); break
+        case 114: binOpen = true; leafFile = ""; leafDir = ""
+                  glia.react("point"); bubble.show(app.pick(app.quips.bin)); break
+        }
+    }
+    Connections {
+        target: (typeof gliaTalk !== "undefined" && gliaTalk) ? gliaTalk : null
+        function onInvoked(id) { app.handleGliaMenu(id) }
+    }
+
+    Rectangle { anchors.fill: parent; radius: 16; color: k.panelBg }
+    NCDEVellum { anchors.fill: parent; base: "transparent"; intensity: 0.85 }
+
+    DragHandler { target: null; onActiveChanged: if (active) app.startSystemMove() }
+
+    MoveToDialog {
+        id: moveDialog
+        onDone: { glia.react("move"); bubble.show(app.pick(app.quips.move)) }
+    }
+
+    // ── rename veil (F2 / context menu) — parchment card, large legible type ──
+    Item {
+        id: renameVeil
+        anchors.fill: parent; visible: false; z: 6000
+        property string targetPath: ""
+        function open(p) {
+            targetPath = p
+            rnField.text = orchidee.baseName(p)
+            visible = true
+            rnField.forceActiveFocus(); rnField.selectAll()
+        }
+        function close() { visible = false; targetPath = "" }
+        function commit() {
+            var np = orchidee.rename(targetPath, rnField.text)
+            if (np !== "") {
+                if (app.leafFile === targetPath) app.leafFile = np
+                glia.react("approve"); bubble.show(app.pick(app.quips.renamed))
+                close()
+            } else {
+                glia.react("point"); bubble.show("That name will not do, my dear.")
+            }
+        }
+        Rectangle {
+            anchors.fill: parent; color: Qt.rgba(0, 0, 0, 0.45)
+            TapHandler { onTapped: renameVeil.close() }
+        }
+        Rectangle {
+            anchors.centerIn: parent
+            width: Math.min(parent.width - 80, 520)
+            height: rnCol.implicitHeight + 36
+            radius: 14
+            color: app.cream; border.color: app.goldDeep; border.width: 1.5
+            TapHandler { }   // swallow taps so the veil doesn't close under the card
+            Column {
+                id: rnCol
+                anchors.left: parent.left; anchors.right: parent.right
+                anchors.top: parent.top; anchors.margins: 18
+                spacing: 12
+                Text { text: "A new name for it, my dear?"
+                       color: app.ink; font.family: theme.titleFont
+                       font.pixelSize: theme.fontLarge }
+                Rectangle {
+                    width: parent.width; height: 42; radius: 8
+                    color: ncde.surface; border.color: app.goldDeep; border.width: 1
+                    TextInput {
+                        id: rnField
+                        anchors.fill: parent; anchors.margins: 10
+                        verticalAlignment: TextInput.AlignVCenter
+                        color: app.ink; font.family: theme.fontFamily
+                        font.pixelSize: theme.fontLarge
+                        clip: true; selectByMouse: true
+                        onAccepted: renameVeil.commit()
+                        Keys.onEscapePressed: renameVeil.close()
+                    }
+                }
+                Row {
+                    anchors.right: parent.right; spacing: 10
+                    Rectangle {
+                        width: rnOkLbl.implicitWidth + 24; height: 30
+                        radius: 8
+                        color: rnOkHov.hovered ? app.burg4 : app.cream
+                        border.color: app.goldDeep; border.width: 1.5
+                        Text { id: rnOkLbl; anchors.centerIn: parent; text: "RENAME"
+                               font.family: theme.fontFamily; font.bold: true
+                               font.pixelSize: theme.fontSmall; font.letterSpacing: 1
+                               color: rnOkHov.hovered ? app.cream : app.burg4 }
+                        HoverHandler { id: rnOkHov }
+                        TapHandler { onTapped: renameVeil.commit() }
+                    }
+                    Rectangle {
+                        width: rnCxLbl.implicitWidth + 24; height: 30
+                        radius: 8
+                        color: "transparent"; border.color: app.goldDeep; border.width: 1
+                        Text { id: rnCxLbl; anchors.centerIn: parent; text: "LEAVE IT"
+                               font.family: theme.fontFamily; font.pixelSize: theme.fontSmall
+                               font.letterSpacing: 1; color: app.ink }
+                        HoverHandler { }
+                        TapHandler { onTapped: renameVeil.close() }
+                    }
+                }
+            }
+        }
+    }
+
+    Column {
+        anchors.fill: parent
+        anchors.margins: 2
+
+        // ── path bar ─────────────────────────────────────────────────────
+        Item {
+            id: pathbar
+            width: parent.width; height: 46
+            // Sidebar toggle
+            Item {
+                id: sidebarToggle
+                anchors.left: parent.left; anchors.leftMargin: 10
+                anchors.verticalCenter: parent.verticalCenter
+                width: 26; height: 26
+                Canvas {
+                    anchors.fill: parent; renderStrategy: Canvas.Cooperative
+                    property bool open: app.sidebarOpen
+                    property bool hov:  stHov.hovered
+                    onOpenChanged: requestPaint(); onHovChanged: requestPaint()
+                    Component.onCompleted: requestPaint()
+                    onPaint: {
+                        var ctx = getContext("2d"); ctx.reset()
+                        var w = width, h = height
+                        ctx.fillStyle = hov ? k.gilt1 : k.wine4
+                        var lw = Math.round(w*0.22), bh = Math.round(h*0.58)
+                        var y0 = Math.round(h/2 - bh/2)
+                        if (!open) ctx.globalAlpha = 0.35
+                        ctx.fillRect(Math.round(w*0.10), y0, lw, bh)
+                        ctx.globalAlpha = 1.0
+                        var x1 = Math.round(w*0.10) + lw + Math.round(w*0.06)
+                        var lh = Math.round(h*0.10), rw = Math.round(w*0.50)
+                        ctx.fillRect(x1, y0 + Math.round(bh*0.10), rw, lh)
+                        ctx.fillRect(x1, y0 + Math.round(bh*0.40), Math.round(rw*0.75), lh)
+                        ctx.fillRect(x1, y0 + Math.round(bh*0.70), Math.round(rw*0.88), lh)
+                    }
+                }
+                HoverHandler { id: stHov }
+                TapHandler { onTapped: { app.sidebarOpen = !app.sidebarOpen; glia.react("point") } }
+            }
+            Row {
+                anchors.left: sidebarToggle.right; anchors.leftMargin: 8
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 4
+                Repeater {
+                    model: app.chain
+                    delegate: Row {
+                        spacing: 4
+                        Text {
+                            text: index === 0 ? "\u2302 Home" : orchidee.baseName(modelData)
+                            color: index === app.chain.length - 1 ? app.ink : app.gold1
+                            font.family: theme.titleFont
+                            font.pixelSize: theme.fontMedium
+                            TapHandler { onTapped: { app.chain = app.chain.slice(0, index + 1); app.leafFile = ""; app.leafDir = "" } }
+                        }
+                        Text { visible: index < app.chain.length - 1; text: "\u203a"
+                               color: app.goldDeep; font.pixelSize: theme.fontMedium }
+                    }
+                }
+            }
+            // free-space readout — the volume under the current folder (UX pack)
+            Text {
+                id: freeSpaceLbl
+                anchors.right: pathbarTools.left; anchors.rightMargin: 16
+                anchors.verticalCenter: parent.verticalCenter
+                text: orchidee.freeSpace(app.chain[app.chain.length - 1])
+                color: app.gold1; font.family: theme.fontFamily; font.italic: true
+                font.pixelSize: theme.fontSmall
+            }
+            // the Sovereign Seal (Ctrl+Alt+E) — gilt fleur when open, dim when shut
+            Item {
+                anchors.right: freeSpaceLbl.left; anchors.rightMargin: 12
+                anchors.verticalCenter: parent.verticalCenter
+                width: 26; height: 26
+                Rectangle {
+                    anchors.fill: parent; radius: 7
+                    color: orchidee.sealOpen ? Qt.rgba(app.gold.r, app.gold.g, app.gold.b, 0.22)
+                                             : "transparent"
+                    border.width: sealHov.hovered || orchidee.sealOpen ? 1.5 : 0
+                    border.color: app.goldDeep
+                }
+                Text {
+                    anchors.centerIn: parent; text: "⚜"
+                    font.pixelSize: theme.fontMedium
+                    color: orchidee.sealOpen ? app.gold : app.gold1
+                    opacity: orchidee.sealOpen ? 1.0 : 0.55
+                }
+                HoverHandler { id: sealHov }
+                TapHandler {
+                    onTapped: {
+                        orchidee.sealOpen = !orchidee.sealOpen
+                        glia.react(orchidee.sealOpen ? "point" : "approve")
+                        bubble.show(app.pick(orchidee.sealOpen ? app.quips.sealOpen : app.quips.sealShut))
+                    }
+                }
+            }
+            // path bar icons — action group + view mode group
+            Row {
+                id: pathbarTools
+                anchors.right: parent.right; anchors.rightMargin: 14
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 6
+
+                // ── NEW FOLDER ──
+                Item {
+                    width: 26; height: 26
+                    Canvas {
+                        anchors.fill: parent; renderStrategy: Canvas.Cooperative
+                        property bool hov: nfHov.hovered
+                        onHovChanged: requestPaint()
+                        Component.onCompleted: requestPaint()
+                        onPaint: {
+                            var ctx = getContext("2d"); ctx.reset()
+                            var w = width, h = height
+                            ctx.strokeStyle = hov ? k.gilt1 : k.wine4
+                            ctx.lineWidth = 1.5; ctx.lineCap = "round"; ctx.lineJoin = "round"
+                            ctx.beginPath()
+                            ctx.moveTo(w*0.13,h*0.35); ctx.lineTo(w*0.13,h*0.23)
+                            ctx.lineTo(w*0.40,h*0.23); ctx.lineTo(w*0.47,h*0.35)
+                            ctx.stroke()
+                            ctx.strokeRect(w*0.13,h*0.35,w*0.74,h*0.47)
+                            ctx.lineWidth = 1.8
+                            ctx.beginPath()
+                            ctx.moveTo(w*0.50,h*0.46); ctx.lineTo(w*0.50,h*0.70)
+                            ctx.moveTo(w*0.38,h*0.58); ctx.lineTo(w*0.62,h*0.58)
+                            ctx.stroke()
+                        }
+                    }
+                    HoverHandler { id: nfHov }
+                    TapHandler { onTapped: { var p=app.chain[app.chain.length-1]; orchidee.makeFolder(p,"New Folder"); glia.react("new"); bubble.show(app.pick(app.quips.create)) } }
+                }
+
+                // ── DUPLICATE ──
+                Item {
+                    width: 26; height: 26
+                    Canvas {
+                        anchors.fill: parent; renderStrategy: Canvas.Cooperative
+                        property bool isEnabled: app.leafFile !== ""
+                        property bool hov: dupHov.hovered
+                        onIsEnabledChanged: requestPaint(); onHovChanged: requestPaint()
+                        Component.onCompleted: requestPaint()
+                        onPaint: {
+                            var ctx = getContext("2d"); ctx.reset()
+                            var w = width, h = height
+                            ctx.strokeStyle = isEnabled ? (hov ? k.gilt1 : k.wine4) : Qt.rgba(k.gilt1.r, k.gilt1.g, k.gilt1.b, 0.35)
+                            ctx.lineWidth = 1.5; ctx.lineJoin = "round"
+                            ctx.beginPath()
+                            ctx.moveTo(w*0.36,h*0.62); ctx.lineTo(w*0.36,h*0.13)
+                            ctx.lineTo(w*0.86,h*0.13); ctx.lineTo(w*0.86,h*0.62)
+                            ctx.stroke()
+                            ctx.strokeRect(w*0.14,h*0.38,w*0.50,h*0.49)
+                        }
+                    }
+                    HoverHandler { id: dupHov }
+                    TapHandler { enabled: app.leafFile !== ""; onTapped: { orchidee.duplicate(app.leafFile); glia.react("duplicate"); bubble.show(app.pick(app.quips.create)) } }
+                }
+
+                // ── DELETE ──
+                Item {
+                    width: 26; height: 26
+                    Canvas {
+                        anchors.fill: parent; renderStrategy: Canvas.Cooperative
+                        property bool isEnabled: app.leafFile !== ""
+                        property bool hov: delHov.hovered
+                        onIsEnabledChanged: requestPaint(); onHovChanged: requestPaint()
+                        Component.onCompleted: requestPaint()
+                        onPaint: {
+                            var ctx = getContext("2d"); ctx.reset()
+                            var w = width, h = height
+                            ctx.strokeStyle = isEnabled ? (hov ? k.gilt1 : k.wine4) : Qt.rgba(k.gilt1.r, k.gilt1.g, k.gilt1.b, 0.35)
+                            ctx.lineWidth = 1.5; ctx.lineCap = "round"; ctx.lineJoin = "round"
+                            ctx.beginPath()
+                            ctx.moveTo(w*0.40,h*0.23); ctx.lineTo(w*0.40,h*0.17)
+                            ctx.lineTo(w*0.60,h*0.17); ctx.lineTo(w*0.60,h*0.23)
+                            ctx.stroke()
+                            ctx.beginPath(); ctx.moveTo(w*0.17,h*0.28); ctx.lineTo(w*0.83,h*0.28); ctx.stroke()
+                            ctx.beginPath()
+                            ctx.moveTo(w*0.25,h*0.28); ctx.lineTo(w*0.25,h*0.83)
+                            ctx.lineTo(w*0.75,h*0.83); ctx.lineTo(w*0.75,h*0.28)
+                            ctx.stroke()
+                            ctx.lineWidth = 1.2
+                            ctx.beginPath()
+                            ctx.moveTo(w*0.40,h*0.36); ctx.lineTo(w*0.40,h*0.75)
+                            ctx.moveTo(w*0.50,h*0.36); ctx.lineTo(w*0.50,h*0.75)
+                            ctx.moveTo(w*0.60,h*0.36); ctx.lineTo(w*0.60,h*0.75)
+                            ctx.stroke()
+                        }
+                    }
+                    HoverHandler { id: delHov }
+                    TapHandler {
+                        enabled: app.leafFile !== ""
+                        onTapped: app.tossLeaf()
+                    }
+                }
+
+                // ── separator ──
+                Rectangle {
+                    width: 1; height: 18
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: Qt.rgba(k.gilt1.r, k.gilt1.g, k.gilt1.b, 0.4)
+                }
+
+                // ── Column mode ──
+                Item {
+                    width: 26; height: 26
+                    Canvas {
+                        anchors.fill: parent; renderStrategy: Canvas.Cooperative
+                        property bool active: app.viewMode === "column"
+                        property bool hov: cmHov.hovered
+                        onActiveChanged: requestPaint(); onHovChanged: requestPaint()
+                        Component.onCompleted: requestPaint()
+                        onPaint: {
+                            var ctx = getContext("2d"); ctx.reset()
+                            ctx.fillStyle = active ? k.wine4 : (hov ? k.gilt1 : Qt.rgba(k.gilt1.r, k.gilt1.g, k.gilt1.b, 0.55))
+                            var bw = Math.round(width*0.14), bh = Math.round(height*0.55)
+                            var gap = Math.round(width*0.09)
+                            var x0 = Math.round(width/2 - (3*bw+2*gap)/2)
+                            var y0 = Math.round(height/2 - bh/2)
+                            for (var i = 0; i < 3; i++) ctx.fillRect(x0+i*(bw+gap), y0, bw, bh)
+                        }
+                    }
+                    HoverHandler { id: cmHov }
+                    TapHandler { onTapped: { app.viewMode = "column"; orchidee.saveViewMode(app.chain[app.chain.length-1], "column"); glia.react("column"); bubble.show(app.pick(app.quips.view)) } }
+                }
+
+                // ── Grid mode ──
+                Item {
+                    width: 26; height: 26
+                    Canvas {
+                        anchors.fill: parent; renderStrategy: Canvas.Cooperative
+                        property bool active: app.viewMode === "grid"
+                        property bool hov: gmHov.hovered
+                        onActiveChanged: requestPaint(); onHovChanged: requestPaint()
+                        Component.onCompleted: requestPaint()
+                        onPaint: {
+                            var ctx = getContext("2d"); ctx.reset()
+                            ctx.fillStyle = active ? k.wine4 : (hov ? k.gilt1 : Qt.rgba(k.gilt1.r, k.gilt1.g, k.gilt1.b, 0.55))
+                            var cx = width/2, cy = height/2
+                            var sz = Math.round(width*0.28), gap = Math.round(width*0.07)
+                            ctx.fillRect(cx-gap-sz, cy-gap-sz, sz, sz)
+                            ctx.fillRect(cx+gap,    cy-gap-sz, sz, sz)
+                            ctx.fillRect(cx-gap-sz, cy+gap,    sz, sz)
+                            ctx.fillRect(cx+gap,    cy+gap,    sz, sz)
+                        }
+                    }
+                    HoverHandler { id: gmHov }
+                    TapHandler { onTapped: { app.viewMode = "grid"; orchidee.saveViewMode(app.chain[app.chain.length-1], "grid"); glia.react("grid"); bubble.show(app.pick(app.quips.view)) } }
+                }
+
+                // ── List mode ──
+                Item {
+                    width: 26; height: 26
+                    Canvas {
+                        anchors.fill: parent; renderStrategy: Canvas.Cooperative
+                        property bool active: app.viewMode === "list"
+                        property bool hov: lmHov.hovered
+                        onActiveChanged: requestPaint(); onHovChanged: requestPaint()
+                        Component.onCompleted: requestPaint()
+                        onPaint: {
+                            var ctx = getContext("2d"); ctx.reset()
+                            ctx.fillStyle = active ? k.wine4 : (hov ? k.gilt1 : Qt.rgba(k.gilt1.r, k.gilt1.g, k.gilt1.b, 0.55))
+                            var bh = Math.round(height*0.12), sp = Math.round(height*0.30)
+                            var ws = [Math.round(width*0.68), Math.round(width*0.54), Math.round(width*0.40)]
+                            var x0 = Math.round(width*0.16), y0 = Math.round(height/2 - sp)
+                            for (var i = 0; i < 3; i++) ctx.fillRect(x0, y0+i*sp-Math.round(bh/2), ws[i], bh)
+                        }
+                    }
+                    HoverHandler { id: lmHov }
+                    TapHandler { onTapped: { app.viewMode = "list"; orchidee.saveViewMode(app.chain[app.chain.length-1], "list"); glia.react("list"); bubble.show(app.pick(app.quips.view)) } }
+                }
+            }
+
+            Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: app.goldDeep; opacity: 0.55 }
+        }
+
+        // ── body: columns + Glia stage ───────────────────────────────────
+        Row {
+            width: parent.width
+            height: parent.height - pathbar.height
+
+            OrchideeSidebar {
+                id: theSidebar
+                showHidden: app.showHidden
+                width: app.sidebarOpen ? 180 : 0
+                height: parent.height
+                clip: true
+                onNavigate: function(p) {
+                    app.binOpen = false
+                    app.chain = (p === orchidee.home) ? [orchidee.home] : [orchidee.home, p]
+                    app.leafFile = ""; app.leafDir = ""
+                }
+                onBinRequested: {
+                    app.binOpen = true; app.leafFile = ""; app.leafDir = ""
+                    glia.react("point"); bubble.show(app.pick(app.quips.bin))
+                }
+                onTossed: function(nm) {
+                    glia.react("delete"); bubble.show(app.pick(app.quips.danger))
+                }
+                onMoved: function(nm) {
+                    glia.react("move"); bubble.show(app.pick(app.quips.move))
+                }
+                onRefused: {
+                    glia.react("point"); bubble.show(app.pick(app.quips.forbidden))
+                }
+            }
+
+            // content area — column / grid / list switcher
+            Loader {
+                id: contentLoader
+                width: parent.width - stage.width - theSidebar.width
+                height: parent.height
+                sourceComponent: app.binOpen              ? binComp
+                               : app.viewMode === "grid" ? gridComp
+                               : app.viewMode === "list" ? listComp
+                               : columnComp
+            }
+
+            Component {
+                id: columnComp
+                Flickable {
+                    anchors.fill: parent
+                    contentWidth: colRow.width
+                    clip: true
+                    flickableDirection: Flickable.HorizontalFlick
+                    boundsBehavior: Flickable.StopAtBounds
+                    function flickToEnd() { contentX = Math.max(0, colRow.width - width) }
+
+                    Row {
+                        id: colRow
+                        height: parent.height
+                        Repeater {
+                            model: app.chain
+                            delegate: MillerColumn {
+                                height: colRow.height
+                                dirPath: modelData
+                                depth: index
+                                showHidden: app.showHidden
+                                selectedPath: index + 1 < app.chain.length ? app.chain[index + 1]
+                                            : (index === app.chain.length - 1 ? app.leafFile : "")
+                                onOpenDir: function(p, d) { app.openDir(p, d) }
+                                onPickFile: function(p, d) { app.pickFile(p, d) }
+                                onActed: function(act) { glia.react(act) }
+                                onAddToDock: function(path) {
+                                    if (!path.endsWith(".desktop")) return
+                                    var entry = orchidee.parseDesktop(path)
+                                    if (orchidee.addToDock(entry))
+                                        bubble.show('Added "' + entry.name + '" to your dock, my dear.')
+                                    else
+                                        bubble.show("That one is already in your dock.")
+                                    glia.react("approve")
+                                }
+                                onRemoveFromDock: function(path) {
+                                    if (!path.endsWith(".desktop")) return
+                                    var entry = orchidee.parseDesktop(path)
+                                    if (orchidee.removeFromDock(entry.name))
+                                        bubble.show('Removed "' + entry.name + '" from your dock.')
+                                    else
+                                        bubble.show("That one is not in your dock.")
+                                    glia.react("approve")
+                                }
+                                onMoveRequested: function(path) { moveDialog.open(path) }
+                                onMoved: function(nm) { glia.react("move"); bubble.show(app.pick(app.quips.move)) }
+                                onRenameRequested: function(p) { app.doRename(p) }
+                                onCutRequested:    function(p) { app.doCut(p) }
+                                onCopyRequested:   function(p) { app.doCopy(p) }
+                                onTossRequested:   function(p) { app.tossPath(p) }
+                            }
+                        }
+                        // leaf preview pane — file or folder
+                        Loader {
+                            active: app.leafFile !== "" || app.leafDir !== ""
+                            height: colRow.height
+                            sourceComponent: app.leafFile !== "" ? filePreviewComp : folderPreviewComp
+                        }
+                        Component {
+                            id: filePreviewComp
+                            FilePreview { path: app.leafFile }
+                        }
+                        Component {
+                            id: folderPreviewComp
+                            FolderPreview { path: app.leafDir }
+                        }
+                    }
+                }
+            }
+
+            Component {
+                id: gridComp
+                FolderGrid {
+                    anchors.fill: parent
+                    dirPath: app.chain[app.chain.length - 1]
+                    showHidden: app.showHidden
+                    onOpenDir: function(p) { app.openDir(p, app.chain.length - 1) }
+                    onPickFile: function(p) { app.pickFile(p, app.chain.length - 1) }
+                    onActed: function(k) { glia.react(k) }
+                    onMoveRequested: function(p) { moveDialog.open(p) }
+                    onMoved: function(nm) { glia.react("move"); bubble.show(app.pick(app.quips.move)) }
+                    onRenameRequested: function(p) { app.doRename(p) }
+                    onCutRequested:    function(p) { app.doCut(p) }
+                    onCopyRequested:   function(p) { app.doCopy(p) }
+                    onTossRequested:   function(p) { app.tossPath(p) }
+                }
+            }
+
+            Component {
+                id: listComp
+                FolderList {
+                    anchors.fill: parent
+                    dirPath: app.chain[app.chain.length - 1]
+                    showHidden: app.showHidden
+                    sortField: app.sortField
+                    sortAscending: app.sortAscending
+                    onOpenDir: function(p) { app.openDir(p, app.chain.length - 1) }
+                    onPickFile: function(p) { app.pickFile(p, app.chain.length - 1) }
+                    onActed: function(k) { glia.react(k) }
+                    onSortChanged: function(field, asc) { app.sortField = field; app.sortAscending = asc }
+                    onMoveRequested: function(p) { moveDialog.open(p) }
+                    onMoved: function(nm) { glia.react("move"); bubble.show(app.pick(app.quips.move)) }
+                    onRenameRequested: function(p) { app.doRename(p) }
+                    onCutRequested:    function(p) { app.doCut(p) }
+                    onCopyRequested:   function(p) { app.doCopy(p) }
+                    onTossRequested:   function(p) { app.tossPath(p) }
+                }
+            }
+
+            // ── THE BIN — Binnie's shared trash, browsed in place (Thunar model;
+            //    Binnie is Glia's father — one family, one bin). In-place REWIND
+            //    restores; the ✕ deletes forever; "Visit Binnie" opens Papa's app. ──
+            Component {
+                id: binComp
+                Item {
+                    // dropping anything onto the open bin view tosses it too
+                    DropArea {
+                        anchors.fill: parent
+                        onDropped: {
+                            var src = drag.source
+                            if (!src || src.dragBinName) return   // already in the bin
+                            if (!src.dragPath) return
+                            if (orchidee.isProtected(src.dragPath)) {
+                                glia.react("point")
+                                bubble.show(app.pick(app.quips.forbidden))
+                                return
+                            }
+                            if (orchidee.trash(src.dragPath)) {
+                                glia.react("delete")
+                                bubble.show(app.pick(app.quips.danger))
+                            }
+                        }
+                    }
+                    Column {
+                        anchors.fill: parent
+                        anchors.margins: 14
+                        spacing: 8
+
+                        Item {
+                            width: parent.width; height: 44
+                            Column {
+                                anchors.verticalCenter: parent.verticalCenter
+                                spacing: 2
+                                Text { text: "THE BIN"
+                                       font.family: theme.titleFont; font.bold: true
+                                       font.letterSpacing: 2; font.pixelSize: theme.fontMedium
+                                       color: app.ink }
+                                Text { text: "everything here rewinds within " + binnieTrash.rewindHours + " hours"
+                                       font.family: theme.fontFamily; font.italic: true
+                                       font.pixelSize: theme.fontSmall; color: app.gold1 }
+                            }
+                            Rectangle {
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: visitLbl.implicitWidth + 24
+                                height: 30; radius: 8
+                                color: app.cream
+                                border.color: visitHov.hovered ? app.burg4 : app.goldDeep
+                                border.width: 1.5
+                                Text { id: visitLbl; anchors.centerIn: parent
+                                       text: "Visit Binnie"
+                                       font.family: theme.fontFamily; font.pixelSize: theme.fontSmall
+                                       color: app.burg4 }
+                                HoverHandler { id: visitHov }
+                                TapHandler { onTapped: { orchidee.launchBinnie(); glia.react("point") } }
+                            }
+                        }
+
+                        Rectangle { width: parent.width; height: 1; color: app.goldDeep; opacity: 0.35 }
+
+                        // empty state
+                        Text {
+                            visible: binnieTrash.items.length === 0
+                            width: parent.width; topPadding: 20
+                            horizontalAlignment: Text.AlignHCenter
+                            text: "The bin is empty, my dear.\nNothing to rewind… for now."
+                            font.family: theme.fontFamily; font.italic: true
+                            font.pixelSize: theme.fontMedium; color: app.gold1
+                        }
+
+                        ListView {
+                            visible: binnieTrash.items.length > 0
+                            width: parent.width
+                            height: parent.height - 70
+                            clip: true
+                            boundsBehavior: Flickable.StopAtBounds
+                            model: binnieTrash.items
+                            delegate: Item {
+                                id: binRowRoot
+                                width: ListView.view.width; height: 40
+                                Rectangle {
+                                    anchors.fill: parent; anchors.margins: 2
+                                    radius: 7
+                                    color: binRowHov.hovered ? Qt.rgba(139/255,30/255,63/255,0.06)
+                                                             : "transparent"
+                                }
+                                // drag OUT of the bin → drop on any folder/place/column
+                                // = restore it THERE (Thunar model, 2026-07-07 UX pack)
+                                Item {
+                                    id: binDragProxy
+                                    parent: binRowRoot.Window.window ? binRowRoot.Window.window.contentItem : binRowRoot
+                                    z: 5000
+                                    width: 190; height: 30
+                                    visible: binDragH.active
+                                    Drag.active: binDragH.active
+                                    Drag.hotSpot: Qt.point(width / 2, height / 2)
+                                    property string dragBinName: modelData.name
+                                    Rectangle {
+                                        anchors.fill: parent; radius: 7
+                                        color: app.cream; border.color: app.goldDeep; border.width: 1.5
+                                        opacity: 0.94
+                                        Row {
+                                            anchors.fill: parent; anchors.leftMargin: 9
+                                            spacing: 6
+                                            Text { anchors.verticalCenter: parent.verticalCenter
+                                                   text: "♻"; color: app.goldDeep
+                                                   font.pixelSize: theme.fontSmall }
+                                            Text { anchors.verticalCenter: parent.verticalCenter
+                                                   width: parent.width - 34; elide: Text.ElideRight
+                                                   text: modelData.name; color: app.ink
+                                                   font.family: theme.fontFamily; font.pixelSize: theme.fontSmall }
+                                        }
+                                    }
+                                }
+                                DragHandler {
+                                    id: binDragH
+                                    target: binDragProxy
+                                    onActiveChanged: {
+                                        if (active) {
+                                            var sp = centroid.scenePosition
+                                            binDragProxy.x = sp.x - binDragProxy.width / 2
+                                            binDragProxy.y = sp.y - binDragProxy.height / 2
+                                        } else {
+                                            binDragProxy.Drag.drop()
+                                        }
+                                    }
+                                }
+                                Row {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 10; anchors.rightMargin: 8
+                                    spacing: 10
+                                    Text { anchors.verticalCenter: parent.verticalCenter
+                                           text: modelData.isDir ? "▸" : "▤"
+                                           color: app.goldDeep; font.pixelSize: theme.fontSmall }
+                                    Column {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: parent.width - 250
+                                        spacing: 1
+                                        Text { width: parent.width; elide: Text.ElideRight
+                                               text: modelData.name
+                                               font.family: theme.fontFamily; font.pixelSize: theme.fontMedium
+                                               color: app.ink }
+                                        Text { width: parent.width; elide: Text.ElideMiddle
+                                               text: "from " + modelData.path
+                                               font.family: theme.fontFamily; font.italic: true
+                                               font.pixelSize: theme.fontSmall - theme.scale(1)
+                                               color: app.gold1 }
+                                    }
+                                    // hours-left pill
+                                    Rectangle {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: hrsLbl.implicitWidth + 16
+                                        height: 22; radius: height / 2
+                                        color: "transparent"
+                                        border.width: 1.5
+                                        border.color: modelData.expired ? app.burg4 : app.goldDeep
+                                        Text { id: hrsLbl; anchors.centerIn: parent
+                                               text: modelData.expired ? "expired"
+                                                     : Math.max(1, Math.ceil(modelData.hoursLeft)) + "h left"
+                                               font.family: theme.fontFamily; font.pixelSize: theme.fontSmall - theme.scale(1)
+                                               color: modelData.expired ? app.burg4 : app.gold1 }
+                                    }
+                                    // REWIND — in-place restore
+                                    Rectangle {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: rwLbl.implicitWidth + 20
+                                        height: 26; radius: 7
+                                        color: rwHov.hovered ? app.burg4 : app.cream
+                                        border.color: app.goldDeep; border.width: 1.5
+                                        Text { id: rwLbl; anchors.centerIn: parent
+                                               text: "REWIND"
+                                               font.family: theme.fontFamily; font.bold: true
+                                               font.pixelSize: theme.fontSmall - theme.scale(1)
+                                               font.letterSpacing: 1
+                                               color: rwHov.hovered ? app.cream : app.burg4 }
+                                        HoverHandler { id: rwHov }
+                                        TapHandler { onTapped: {
+                                            if (binnieTrash.restore(modelData.name)) {
+                                                glia.react("approve")
+                                                bubble.show(app.pick(app.quips.rescue))
+                                            }
+                                        } }
+                                    }
+                                    // delete forever
+                                    Rectangle {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 26; height: 26
+                                        radius: 7
+                                        color: fvHov.hovered ? app.burg4 : "transparent"
+                                        border.color: fvHov.hovered ? app.burg4 : app.goldDeep
+                                        border.width: 1.5
+                                        Text { anchors.centerIn: parent; text: "✕"
+                                               font.pixelSize: theme.fontSmall
+                                               color: fvHov.hovered ? app.cream : app.gold1 }
+                                        HoverHandler { id: fvHov }
+                                        TapHandler { onTapped: {
+                                            binnieTrash.remove(modelData.name)
+                                            glia.react("worry")
+                                        } }
+                                    }
+                                }
+                                HoverHandler { id: binRowHov }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── Glia's stage ──
+            Item {
+                id: stage
+                width: 284; height: parent.height
+                Rectangle {
+                    anchors.fill: parent
+                    gradient: Gradient {
+                        GradientStop { position: 0; color: k.dark ? Qt.rgba(0.12,0.08,0.04,0.55) : Qt.rgba(1,0.97,0.88,0.55) }
+                        GradientStop { position: 1; color: k.dark ? Qt.rgba(0.07,0.04,0.02,0.35) : Qt.rgba(0.85,0.8,0.66,0.35) }
+                    }
+                }
+                Rectangle { width: 1; height: parent.height; color: app.goldDeep; opacity: 0.5 }
+
+                // speech scroll
+                Item {
+                    id: bubble
+                    property bool shown: false
+                    anchors.top: parent.top; anchors.topMargin: 14
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    width: parent.width - 32; height: cloud.height
+                    opacity: shown ? 1 : 0
+                    Behavior on opacity { NumberAnimation { duration: 220 } }
+                    function show(t){ msg.text = t; shown = true; hideT.restart() }
+                    Timer { id: hideT; interval: 4200; onTriggered: bubble.shown = false }
+                    Rectangle {
+                        id: cloud; width: parent.width; radius: 14
+                        height: msg.implicitHeight + 22
+                        color: app.cream; border.width: 1.5; border.color: app.goldDeep
+                        Text {
+                            id: msg; anchors.centerIn: parent
+                            width: parent.width - 26
+                            wrapMode: Text.WordWrap; horizontalAlignment: Text.AlignHCenter
+                            font.family: theme.fontFamily; font.italic: true
+                            font.pixelSize: theme.fontSmall + theme.scale(1); color: app.burg4
+                        }
+                    }
+                }
+
+                GliaCanvas {
+                    id: glia
+                    assetBase: app.assetBase
+                    anchors.top: bubble.bottom; anchors.bottom: cap.top
+                    anchors.left: parent.left; anchors.right: parent.right
+                    anchors.margins: 4
+                }
+
+                Column {
+                    id: cap
+                    anchors.bottom: parent.bottom; anchors.bottomMargin: 14
+                    anchors.horizontalCenter: parent.horizontalCenter; spacing: 1
+                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: "GLIA"
+                           font.family: theme.titleFont; font.bold: true; font.letterSpacing: 2
+                           font.pixelSize: theme.fontMedium; color: app.ink }
+                    Text { anchors.horizontalCenter: parent.horizontalCenter
+                           text: "governess of the desk"; font.family: theme.fontFamily; font.italic: true
+                           font.pixelSize: theme.fontSmall + theme.scale(1); color: app.gold1 }
+                }
+            }
+        }
+    }
+
+    // Glia's voice
+    readonly property var quips: ({
+        greet: ["Oh, hello my darlings. I see you have come for a visit \u2014 tread lightly, or you may lose things you hold dear."],
+        create:["A fresh page. Mind you fill it with something worthy.",
+                "There \u2014 newly drawn. Do keep it tidy."],
+        danger:["Darling, bring me the orphans. Poor things.",
+                "Into the bin it goes\u2026 you have a day to reconsider, then it is gone.",
+                "Careful, my dear. What is deleted is not so easily un-written."],
+        view:  ["A different perspective, hmm? Very well.",
+                "Arrangement is a form of thought, my dear."],
+        move:  ["Properly filed. Very good.",
+                "One does not simply leave things where they are found."],
+        bin:   ["Papa keeps everything safe for a day. Choose what to rescue.",
+                "The bin, my dear — Papa watches over it."],
+        rescue:["Voilà — back where it belongs.",
+                "Rescued. Do be more careful with it, hmm?"],
+        forbidden:["That one belongs to the house itself, my dear. It stays.",
+                   "Non. Some things are not ours to toss.",
+                   "The house would fall down without that one. Leave it be."],
+        clip:  ["On the tray. Say where, and I shall set it down.",
+                "Noted. It travels with us now."],
+        paste: ["Set down, just so.",
+                "There — delivered to its new address."],
+        undo:  ["Unwound, as if it never happened.",
+                "Time turned back one small step, my dear."],
+        renamed:["A finer name. It suits.",
+                 "Re-christened. Do address it properly now."],
+        sealOpen:["The seal is lifted, my dear. The house's own rooms will ask for your key.",
+                  "Very well — sovereign work. Mind where you tread."],
+        sealShut:["Sealed again. The house rests easier.",
+                  "The key is back on its hook."],
+        hiddenOn: ["The hidden ones, revealed. Mind where you step.",
+                   "Voilà — every last one, even the shy ones."],
+        hiddenOff:["Tucked away again. Out of sight, out of trouble.",
+                   "The shy ones may rest now."]
+    })
+    function pick(a){ return a[Math.floor(Math.random()*a.length)] }
+    Component.onCompleted: { greetT.start(); publishGliaMenus() }
+    Timer {
+        id: greetT; interval: 700
+        onTriggered: {
+            glia.react("greet")
+            var msg = (typeof startPath !== "undefined" && startPath !== "")
+                ? "Papa sent one home. Welcome back, my dear."
+                : app.pick(app.quips.greet)
+            bubble.show(msg)
+        }
+    }
+
+    // fade → Binnie after DELETE (600 ms so the quip is readable, then 280 ms fade)
+    Timer { id: fadeToBinnie; interval: 600; onTriggered: { app.opacity = 0.0; launchBinnieTimer.start() } }
+    Timer { id: launchBinnieTimer; interval: 300; onTriggered: { orchidee.launchBinnie(); closeOrchideeTimer.start() } }
+    Timer { id: closeOrchideeTimer; interval: 60; onTriggered: app.close() }
+}

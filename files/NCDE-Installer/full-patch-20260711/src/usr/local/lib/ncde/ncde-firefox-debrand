@@ -1,0 +1,14 @@
+#!/bin/bash
+# NCDE fix 2026-07-17 — Firefox distribution.ini re-branding (commercial.md
+# Identity/Branding rule: no user-visible Arch mentions). The firefox package
+# ships this file un-backed-up, so a plain edit gets silently overwritten on
+# the next Firefox update — this hook reapplies it every time.
+set -e
+install -Dm644 /dev/stdin /usr/lib/firefox/distribution/distribution.ini <<'EOF'
+[Global]
+id=ncde
+version=1.0
+about=NCDE
+
+[Preferences]
+EOF

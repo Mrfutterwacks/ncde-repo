@@ -1,0 +1,10 @@
+[Unit]
+Description=Check for NCDE updates a few times a day
+
+[Timer]
+OnStartupSec=3min
+OnUnitActiveSec=4h
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target

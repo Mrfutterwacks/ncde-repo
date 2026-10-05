@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Magpie Talker notifications
+Comment=Pops Facebook Messenger messages from Magpie Talker through dunst
+Exec=/usr/local/bin/magpie-notify %u
+MimeType=x-scheme-handler/magpie-notify;
+NoDisplay=true
+Terminal=false

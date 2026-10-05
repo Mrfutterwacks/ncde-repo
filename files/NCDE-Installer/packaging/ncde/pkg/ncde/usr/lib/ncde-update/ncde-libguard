@@ -1,0 +1,99 @@
+#!/bin/bash
+# ncde-libguard pre|post — Arch updates can never break NCDE's programs.
+#
+# NCDE's C++ programs (LaPivot, ncde-wm, the house apps, the NCDE QML plugins)
+# have no source left to rebuild from, so when an Arch update drops a library
+# version they were built against (2026-09-25: jsoncpp .so.26 -> .so.27 left
+# Magpie unable to start), nothing could relink them. This keeps them whole:
+#   pre  (before every pacman transaction) — stash a copy of each system library
+#        the NCDE programs link to, as it is right now (Qt and glibc are skipped:
+#        their sonames stay stable, and NCDE uses no Qt private API — the one
+#        plugin that does, ncde-qpa, rebuilds itself on every Qt update).
+#   post (after it) — any NCDE program now missing a library gets the stashed
+#        copy back, in /usr/lib/ncde-compat (on the loader path via
+#        /etc/ld.so.conf.d/ncde-compat.conf). That folder only ever holds
+#        libraries the system NO LONGER has, so it never shadows a real one.
+#        Still broken after that -> logged + a notification, never silent.
+set -u
+STASH=${LIBGUARD_STASH:-/var/lib/ncde-libguard/stash}
+COMPAT=${LIBGUARD_COMPAT:-/usr/lib/ncde-compat}
+LOG=${LIBGUARD_LOG:-/var/log/ncde/libguard.log}
+ELF_DIRS=${LIBGUARD_ELF_DIRS:-"/usr/local/bin /usr/local/lib /usr/lib/ncde /usr/lib/qt6/qml/NCDE"}
+LDCONFIG=${LIBGUARD_LDCONFIG:-ldconfig}
+SYSDIRS=${LIBGUARD_SYSDIRS:-"/usr/lib /usr/lib64 /lib"}
+SKIP='^(libQt6|libc\.so|libm\.so|libstdc\+\+|libgcc_s|ld-linux|libdl\.so|libpthread|librt\.so|linux-vdso)'
+mkdir -p "$STASH" "$COMPAT" "$(dirname "$LOG")"
+log(){ printf '%s %s\n' "$(date -Is)" "$*" >> "$LOG"; }
+
+# NCDE's own ELF files (backups like *.prebak-*, *.reverted-* are not programs)
+elves(){
+  for d in $ELF_DIRS; do
+    [ -d "$d" ] || continue
+    find "$d" -type f \( -perm -u+x -o -name '*.so' \) ! -name '*.prebak*' ! -name '*.reverted*' ! -name '*.bak' 2>/dev/null
+  done | while read -r f; do head -c4 "$f" 2>/dev/null | grep -q $'\x7fELF' && echo "$f"; done
+}
+
+pre(){
+  # every library the NCDE programs load (ldd = the full closure), minus Qt/glibc
+  elves | xargs -r -d '\n' ldd 2>/dev/null | awk '$2=="=>" && $3 ~ /^\// {print $1, $3}' | sort -u |
+  while read -r so path; do
+    [[ "$so" == */* || "$so" =~ $SKIP ]] && continue
+    case "$path" in "$COMPAT"/*) continue ;; esac
+    if ! cmp -s "$path" "$STASH/$so" 2>/dev/null; then
+      cp -L "$path" "$STASH/$so.new" && mv -f "$STASH/$so.new" "$STASH/$so"
+    fi
+  done
+  return 0
+}
+
+missing(){ elves | while read -r f; do ldd "$f" 2>/dev/null | awk -v f="$f" '/not found/ {print $1, f}'; done | sort -u; }
+
+post(){
+  local changed=0
+  # 1. drop compat copies the system provides again (never shadow a real library)
+  for c in "$COMPAT"/*; do
+    [ -e "$c" ] || continue
+    so=$(basename "$c")
+    for d in $SYSDIRS; do
+      if [ -e "$d/$so" ]; then rm -f "$c"; log "system has $so again — removed compat copy"; changed=1; break; fi
+    done
+  done
+  [ $changed -eq 1 ] && $LDCONFIG
+  # 2. restore what went missing; repeat, since a restored library can need another
+  for _ in 1 2 3 4 5; do
+    local fixed=0
+    while read -r so f; do
+      [ -n "$so" ] || continue
+      if [ -f "$STASH/$so" ] && [ ! -e "$COMPAT/$so" ]; then
+        install -m 755 "$STASH/$so" "$COMPAT/$so" && { log "restored $so for $f"; fixed=1; }
+      fi
+    done < <(missing)
+    [ $fixed -eq 1 ] || break
+    $LDCONFIG
+  done
+  # 3. anything still broken: say so
+  local left; left="$(missing)"
+  if [ -n "$left" ]; then
+    log "STILL MISSING after restore: $(echo "$left" | tr '\n' ';')"
+    echo "NCDE libguard: some NCDE programs are missing libraries — see $LOG"
+    notify "NCDE needs attention" "An Arch update removed a library NCDE uses and no saved copy exists. Details: $LOG"
+    return 1
+  fi
+  return 0
+}
+
+notify(){
+  command -v notify-send >/dev/null || return 0
+  for b in /run/user/*/bus; do
+    [ -S "$b" ] || continue
+    uid=$(basename "$(dirname "$b")"); u=$(id -nu "$uid" 2>/dev/null) || continue
+    sudo -u "$u" DBUS_SESSION_BUS_ADDRESS="unix:path=$b" notify-send -a NCDE -u critical -i dialog-warning "$1" "$2" 2>/dev/null || true
+  done
+}
+
+case "${1:-}" in
+  pre)  pre ;;
+  post) post ;;
+  check) m="$(missing)"; [ -z "$m" ] && echo "all NCDE programs have their libraries" || { echo "$m"; exit 1; } ;;
+  *) echo "usage: ncde-libguard pre|post|check"; exit 2 ;;
+esac

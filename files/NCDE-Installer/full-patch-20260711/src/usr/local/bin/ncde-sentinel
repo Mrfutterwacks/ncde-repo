@@ -1,0 +1,16 @@
+#!/usr/bin/env python3
+"""ncde-sentinel — hardware guardian for NCDE Poseidon.
+
+Thin launcher for the sentinel package. Installed at /usr/local/bin/ncde-sentinel.
+"""
+
+import sys
+import os
+
+_pkg_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sentinel")
+if os.path.isdir(_pkg_dir):
+    sys.path.insert(0, os.path.dirname(_pkg_dir))
+
+from sentinel.__main__ import main
+
+main()

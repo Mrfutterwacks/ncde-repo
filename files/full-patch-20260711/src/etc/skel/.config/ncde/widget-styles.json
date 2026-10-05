@@ -1,0 +1,44 @@
+{
+    "clock": {
+        "accent": "",
+        "fill": "#f6efdc",
+        "font": "Cinzel",
+        "glow": "",
+        "leading": ""
+    },
+    "laombre": {
+        "accent": "",
+        "fill": "#E158FF",
+        "font": "Cinzel",
+        "glow": "",
+        "leading": ""
+    },
+    "salon": {
+        "accent": "",
+        "fill": "#f6efdc",
+        "font": "Cinzel",
+        "glow": "",
+        "leading": ""
+    },
+    "space": {
+        "accent": "",
+        "fill": "#f6efdc",
+        "font": "Cinzel",
+        "glow": "",
+        "leading": ""
+    },
+    "stats": {
+        "accent": "",
+        "fill": "#f6efdc",
+        "font": "Cinzel",
+        "glow": "",
+        "leading": ""
+    },
+    "weather": {
+        "accent": "",
+        "fill": "#f6efdc",
+        "font": "Cinzel",
+        "glow": "",
+        "leading": ""
+    }
+}

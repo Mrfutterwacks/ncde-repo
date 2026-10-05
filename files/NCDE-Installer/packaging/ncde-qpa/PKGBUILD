@@ -1,0 +1,22 @@
+# NCDE Qt platform theme (GliaTalk global menu for foreign Qt apps).
+# Uses Qt private API, so it is rebuilt ON EACH MACHINE whenever qt6-base
+# changes (see ncde-qpa-rebuild). A Qt update can never leave a broken plugin:
+# it is either rebuilt+verified or set aside.
+pkgname=ncde-qpa
+pkgver=1.0
+pkgrel=1
+pkgdesc="NCDE Qt platform theme, self-rebuilding on Qt updates"
+arch=('x86_64')
+license=('custom')
+depends=('qt6-base' 'libxcb' 'gcc' 'pkgconf')
+install=ncde-qpa.install
+source=('ncde-qpa-theme.cpp' 'ncde.json' 'ncde-qpa-probe.cpp'
+        'ncde-qpa-rebuild' 'ncde-qpa-rebuild.hook')
+sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')
+
+package() {
+  install -Dm644 -t "$pkgdir/usr/share/ncde-qpa/src" \
+    ncde-qpa-theme.cpp ncde.json ncde-qpa-probe.cpp
+  install -Dm755 ncde-qpa-rebuild "$pkgdir/usr/lib/ncde-qpa/ncde-qpa-rebuild"
+  install -Dm644 ncde-qpa-rebuild.hook "$pkgdir/usr/share/libalpm/hooks/90-ncde-qpa-rebuild.hook"
+}

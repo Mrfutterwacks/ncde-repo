@@ -1,0 +1,12 @@
+[Unit]
+Description=Vesper brain service — NCDE security library (MITRE) + engine orchestration
+After=network.target
+
+[Service]
+WorkingDirectory=/usr/lib/ncde/vesper
+ExecStart=/usr/bin/python3 /usr/lib/ncde/vesper/brain_server.py
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

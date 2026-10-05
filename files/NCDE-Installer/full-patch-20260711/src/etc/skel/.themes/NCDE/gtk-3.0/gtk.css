@@ -1,0 +1,7 @@
+/* NCDE — managed by NCDEEngine. Do not edit. */
+/* This is the seed entry point. The engine rewrites the import line to
+   _palette-light.css when light mode is active. Import order is load-bearing:
+   palette (grounds) → accent (live) → rules (re-grounds widgets by name). */
+@import url("_palette-dark.css");
+@import url("_accent.css");
+@import url("_rules.css");

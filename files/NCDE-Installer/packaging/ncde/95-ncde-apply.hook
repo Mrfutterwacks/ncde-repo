@@ -1,0 +1,10 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = ncde
+
+[Action]
+Description = Queuing the NCDE patch to apply after this update...
+When = PostTransaction
+Exec = /usr/lib/ncde-update/ncde-apply --queue

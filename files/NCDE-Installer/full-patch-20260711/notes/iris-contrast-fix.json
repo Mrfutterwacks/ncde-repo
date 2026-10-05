@@ -1,0 +1,127 @@
+[
+  {
+    "id": "mucha",
+    "old": "#af7e22",
+    "new": "#ad7c22"
+  },
+  {
+    "id": "tiffany",
+    "old": "#0abab5",
+    "new": "#089995"
+  },
+  {
+    "id": "cathedral",
+    "old": "#853d78",
+    "new": "#b0529f"
+  },
+  {
+    "id": "undercroft",
+    "old": "#47663e",
+    "new": "#48683f"
+  },
+  {
+    "id": "crimsoncodex",
+    "old": "#7b2934",
+    "new": "#ba3e4e"
+  },
+  {
+    "id": "azurethrone",
+    "old": "#1c46b4",
+    "new": "#3564e0"
+  },
+  {
+    "id": "ironstorm",
+    "old": "#ab4d47",
+    "new": "#b65750"
+  },
+  {
+    "id": "streetsaints",
+    "old": "#746b3d",
+    "new": "#7b7241"
+  },
+  {
+    "id": "bloodforest",
+    "old": "#874a37",
+    "new": "#92503b"
+  },
+  {
+    "id": "deepwaters",
+    "old": "#0c5d69",
+    "new": "#0e6c79"
+  },
+  {
+    "id": "embercircle",
+    "old": "#a0522d",
+    "new": "#b45c32"
+  },
+  {
+    "id": "hermeticarch",
+    "old": "#9d1c2d",
+    "new": "#b62134"
+  },
+  {
+    "id": "bloodthorn",
+    "old": "#a12e61",
+    "new": "#b0326a"
+  },
+  {
+    "id": "ironprotocol",
+    "old": "#e00c0c",
+    "new": "#e40c0c"
+  },
+  {
+    "id": "absolution",
+    "old": "#533766",
+    "new": "#774f92"
+  },
+  {
+    "id": "reveriedark",
+    "old": "#4b3e8a",
+    "new": "#6859b4"
+  },
+  {
+    "id": "morningfrost",
+    "old": "#1c98e0",
+    "new": "#1a8ed1"
+  },
+  {
+    "id": "ironappetite",
+    "old": "#7b2913",
+    "new": "#b33c1c"
+  },
+  {
+    "id": "winedark",
+    "old": "#6c445d",
+    "new": "#865574"
+  },
+  {
+    "id": "seafoam",
+    "old": "#63a381",
+    "new": "#548f6f"
+  },
+  {
+    "id": "innocentveil",
+    "old": "#c189a2",
+    "new": "#b97a97"
+  },
+  {
+    "id": "inquisitorsl",
+    "old": "#d3364a",
+    "new": "#d43a4d"
+  },
+  {
+    "id": "sylvancourt",
+    "old": "#077220",
+    "new": "#077a22"
+  },
+  {
+    "id": "suncourt",
+    "old": "#be9205",
+    "new": "#a78004"
+  },
+  {
+    "id": "ironfleet",
+    "old": "#454d64",
+    "new": "#657192"
+  }
+]

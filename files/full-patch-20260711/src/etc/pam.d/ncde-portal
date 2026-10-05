@@ -1,0 +1,11 @@
+#%PAM-1.0
+# /etc/pam.d/ncde-portal — the login stack for Portal's helper.
+# It MUST include the full system-login stack (NOT system-auth): system-login
+# pulls in pam_systemd (logind session registration), pam_limits (the memlock/
+# rtprio limits ncde-wm needs for mlockall + SCHED_FIFO), and the standard
+# auth/account/password/session chain. Stripping this to system-auth makes login
+# "succeed" while logind registration, lock, logout, reboot and suspend break.
+auth       include   system-login
+account    include   system-login
+password   include   system-login
+session    include   system-login

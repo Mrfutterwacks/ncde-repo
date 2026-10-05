@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# verda — the NCDE terminal's package command (Verda).
+# A power-user / terminal-only tool. Regular users never touch this — ncde-command
+# is their path. verda is the friendly front for the system package work; the base
+# OS stays out of sight (NCDE hides it like Windows/macOS hide their plumbing).
+#
+# Usage:
+#   verda install <name>...     install package(s)
+#   verda remove  <name>...     remove package(s) (with unneeded deps)
+#   verda update                refresh + upgrade everything
+#   verda search  <term>        search for available packages
+#   verda info    <name>        show details for a package
+#   verda list    [term]        list installed packages (optionally filtered)
+#   verda help                  this help
+#
+# Notes: the password prompt is the system's own (type it, press Enter). Live
+# download/install progress is shown so you always see what is happening.
+
+esc=$'\033'
+R="${esc}[0m"
+B="${esc}[1m"
+ROSE="${esc}[1;38;2;207;101;146m"
+KEY="${esc}[1;38;2;244;208;96m"
+VAL="${esc}[38;2;244;217;164m"
+DIM="${esc}[38;2;122;106;76m"
+
+# The base package tool, kept in one place and never named in user-facing text.
+PKG=pacman
+
+banner() { printf '%s\n%s  %s%s%s\n%s\n' \
+    "${DIM}─────────────────────────${R}" \
+    "${ROSE}${B}Verda${R}" "${VAL}$1${R}" "" "" \
+    "${DIM}─────────────────────────${R}"; }
+
+err()  { printf '%sVerda:%s %s\n' "${ROSE}${B}" "${R}" "$1" >&2; }
+
+need_args() {
+    if [ "$#" -eq 0 ]; then
+        err "nothing specified. Try: ${VAL}verda help${R}"
+        exit 2
+    fi
+}
+
+usage() {
+    printf '\n%s%sVerda%s %s— terminal package command%s\n\n' \
+        "${ROSE}${B}" "" "${R}" "${DIM}" "${R}"
+    printf '  %sverda install%s %s<name>...%s   install package(s)\n'        "${KEY}" "${R}" "${VAL}" "${R}"
+    printf '  %sverda remove%s  %s<name>...%s   remove package(s)\n'          "${KEY}" "${R}" "${VAL}" "${R}"
+    printf '  %sverda update%s             %srefresh + upgrade everything%s\n' "${KEY}" "${R}" "${DIM}" "${R}"
+    printf '  %sverda search%s  %s<term>%s      find available packages\n'    "${KEY}" "${R}" "${VAL}" "${R}"
+    printf '  %sverda info%s    %s<name>%s      show package details\n'       "${KEY}" "${R}" "${VAL}" "${R}"
+    printf '  %sverda list%s    %s[term]%s      list installed packages\n'    "${KEY}" "${R}" "${VAL}" "${R}"
+    printf '  %sverda help%s               %sthis help%s\n\n'                 "${KEY}" "${R}" "${DIM}" "${R}"
+}
+
+cmd="${1:-help}"
+[ "$#" -gt 0 ] && shift
+
+case "$cmd" in
+    install|add|i)
+        need_args "$@"
+        banner "Installing: $*"
+        sudo "$PKG" -S --needed "$@"
+        ;;
+    remove|rm|uninstall)
+        need_args "$@"
+        banner "Removing: $*"
+        sudo "$PKG" -Rns "$@"
+        ;;
+    update|upgrade|up)
+        banner "Updating the system"
+        sudo "$PKG" -Syu
+        ;;
+    search|find|s)
+        need_args "$@"
+        "$PKG" -Ss "$@"
+        ;;
+    info|show)
+        need_args "$@"
+        # installed copy if present, otherwise the available one
+        if "$PKG" -Qi "$@" 2>/dev/null; then :; else "$PKG" -Si "$@"; fi
+        ;;
+    list|ls)
+        if [ "$#" -gt 0 ]; then "$PKG" -Q | grep -i -- "$1"; else "$PKG" -Q; fi
+        ;;
+    help|-h|--help|"")
+        usage
+        ;;
+    *)
+        err "unknown command '${cmd}'. Try: ${VAL}verda help${R}"
+        exit 2
+        ;;
+esac

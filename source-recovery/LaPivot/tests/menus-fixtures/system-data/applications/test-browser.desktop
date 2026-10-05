@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Test Browser
+Exec=record-app "browser ; literal" %u
+Icon=web-browser
+Categories=Network;WebBrowser;
+NoDisplay=false
+Hidden=false

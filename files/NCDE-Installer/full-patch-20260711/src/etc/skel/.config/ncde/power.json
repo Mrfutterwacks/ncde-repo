@@ -1,0 +1,9 @@
+{
+    "acBlank": 15,
+    "acSuspend": 0,
+    "batBlank": 5,
+    "batSuspend": 15,
+    "lidAction": "suspend",
+    "powerButtonAction": "poweroff",
+    "showBatteryPct": true
+}

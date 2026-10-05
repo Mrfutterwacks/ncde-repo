@@ -1,0 +1,16 @@
+#!/bin/bash
+# ncde-rollback — put back the NCDE version this machine had before the last
+# update (pacman keeps it in its cache). The hook re-applies that older patch,
+# so every file it ships returns to the previous version.
+set -eu
+[ "$(id -u)" -eq 0 ] || exec sudo "$0" "$@"
+CUR="$(pacman -Q ncde | awk '{print $2}')"
+PREV="$(ls -1 /var/cache/pacman/pkg/ncde-[0-9]*.pkg.tar.zst 2>/dev/null \
+  | grep -v -- "-$CUR-" | sort -V | tail -1)"
+[ -n "$PREV" ] || { echo "No earlier NCDE package in the pacman cache — use Soundings to restore a snapshot instead."; exit 1; }
+echo "Installed: ncde $CUR"
+echo "Going back to: $(basename "$PREV")"
+read -r -p "Continue? [y/N] " a
+[ "${a:-n}" = y ] || [ "${a:-n}" = Y ] || exit 0
+pacman -U --noconfirm "$PREV"
+echo "Done. It stays on this version until the next update, which brings the newest NCDE again."

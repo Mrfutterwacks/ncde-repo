@@ -1,0 +1,54 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "name": "NCDE Poseidon",
+  "description": "NCDE desktop environment — build, ISO, and development workspace",
+  "instructions": [
+    "AGENTS.md",
+    "../ncde-docs/CLAUDE.md",
+    "../ncde-docs/SESSION_HANDOFF.md",
+    "../ncde-docs/MEMORY.md",
+    "../ncde-docs/NEXT-AGENT-START.md",
+    "../ncde-docs/ncde-completeness-audit.md",
+    "../ncde-docs/ncdeedit.md"
+  ],
+  "workspaces": {
+    "project": "/home/stephen/my-project",
+    "rootfs": "/home/stephen/ncde-x11",
+    "iso": "/home/stephen/ncde-ISO",
+    "staging": "/home/stephen/ncde-staging",
+    "docs": "/home/stephen/ncde-docs"
+  },
+  "commands": {
+    "session-start": {
+      "template": "Read AGENTS.md, the CLAUDE.md instructions, SESSION_HANDOFF.md, and MEMORY.md. Then output the session start checklist from AGENTS.md with every field filled in based on what you read.",
+      "description": "Output the session start checklist"
+    },
+    "check-tree": {
+      "template": "Show the current state of ~/ncde-x11/etc/ncde/ and key config files.",
+      "description": "Check NCDE tree state"
+    },
+    "build-lelan": {
+      "template": "Build lelan-host from ~/ncde-staging/compass7/lelan/ and report compile output.",
+      "description": "Build lelan-host from staging"
+    },
+    "sync-docs": {
+      "template": "Read SESSION_HANDOFF.md and MEMORY.md to understand current state. Then: (1) update SESSION_HANDOFF.md with this session's results, (2) add or update the matching memory entry in MEMORY.md, (3) show the diff of both files.",
+      "description": "Sync session docs (SESSION_HANDOFF.md + MEMORY.md)"
+    },
+    "install-qml": {
+      "template": "Stage QML fix by: (1) reading the live file at /usr/share/ncde/$ARGUMENTS, (2) reading the staged fix at ~/ncde-staging/scratch/$ARGUMENTS, (3) showing the diff, (4) handing the operator the sudo install command.",
+      "description": "Stage and prepare QML fix for operator install"
+    }
+  },
+  "permission": {
+    "edit": "ask"
+  },
+  "env": {
+    "NCDE_PROJECT": "/home/stephen/my-project",
+    "NCDE_ROOTFS": "/home/stephen/ncde-x11",
+    "NCDE_ISO": "/home/stephen/ncde-ISO",
+    "NCDE_STAGING": "/home/stephen/ncde-staging",
+    "NCDE_DOCS": "/home/stephen/ncde-docs"
+  },
+  "disabled_providers": ["openai", "gemini", "mistral", "groq"]
+}

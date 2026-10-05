@@ -1,0 +1,20 @@
+#!/bin/bash
+# ncde-vesper — launch Vesper. Ensures his brain service is up, then opens the UI.
+BRAIN=/usr/lib/ncde/vesper
+UI=/usr/share/ncde/vesper
+export QT_QPA_PLATFORM=xcb          # NCDE is X11
+
+# single instance (2026-07-05 audit): the shell's threat-trigger and a user launch
+# must never stack a second phosphor window — the running one already shows the alert.
+if pgrep -f "qml6 -I $UI $UI/Main.qml" >/dev/null 2>&1; then
+    exit 0
+fi
+
+# start the brain service if it isn't already listening on :8077
+if ! curl -s --max-time 2 http://127.0.0.1:8077/whoami >/dev/null 2>&1; then
+    systemctl --user start vesper-brain.service 2>/dev/null \
+        || ( cd "$BRAIN" && python3 "$BRAIN/brain_server.py" >/dev/null 2>&1 & )
+    sleep 1
+fi
+
+exec qml6 -I "$UI" "$UI/Main.qml"

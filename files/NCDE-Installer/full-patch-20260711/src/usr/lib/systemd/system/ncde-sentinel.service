@@ -1,0 +1,36 @@
+[Unit]
+Description=NCDE Sentinel — hardware event monitor
+Documentation=https://ncde.io/sentinel
+After=dbus.service
+Wants=dbus.service
+
+[Service]
+Type=notify
+ExecStart=/usr/local/bin/ncde-sentinel
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=5
+# Liveness, not just crash detection — catches a hung mainloop (blocked
+# syscall, deadlock), which Restart=on-failure alone never would.
+WatchdogSec=30
+# Auto-created (root:root 0755) before the service starts — zero manual setup,
+# zero user maintenance. Holds the kernel-capability cache (see kernel_caps.py).
+StateDirectory=ncde-sentinel
+# Real ceiling matching "always lightweight" — normal usage is ~32MB/2 tasks
+# (measured live 2026-07-02), generous headroom without being unbounded.
+MemoryMax=256M
+TasksMax=32
+# Safe hardening that does NOT interfere with this daemon's actual job (it
+# must write cpufreq/EPP/dirty_ratio/RAPL sysfs nodes and drive systemd's
+# cgroup-scope API — so ProtectKernelTunables=/ProtectControlGroups=/an
+# aggressive SystemCallFilter= are deliberately NOT set here without first
+# testing every real write path against them; adding those blind risks
+# silently breaking the governor/EPP/RAPL/tiering work this session built).
+ProtectHome=yes
+ProtectClock=yes
+RestrictNamespaces=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

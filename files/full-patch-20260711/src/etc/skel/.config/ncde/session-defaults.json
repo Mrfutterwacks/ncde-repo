@@ -1,0 +1,6 @@
+{
+    "browser": "chromium",
+    "files": "orchidee",
+    "mail": "hummingbird-courier",
+    "terminal": "ncde-terminal"
+}

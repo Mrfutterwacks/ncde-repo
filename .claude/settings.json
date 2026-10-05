@@ -1,0 +1,56 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/session-start-reminder.sh"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/enforce-communication.sh"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "subagent|Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/gatekeeper.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/block-uncertainty.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Check ONLY if tool_input.file_path is under ~/my-project/docs/ and ends in .md — otherwise respond ok:true immediately with no further analysis. If it is a docs .md file: compare tool_input.new_string/content against the rest of the file and the edit's apparent purpose. Flag (ok:false) ONLY if the added text makes a concrete technical/architectural claim (e.g. naming something a 'pillar', 'governor', 'branding', asserting a component's purpose or design beyond plain fact) that is NOT: (a) a direct quote or clear paraphrase of something the operator (Stephen) said in the conversation, or (b) directly backed by a command/file citation in the same edit. Do not flag operator-attributed intent/metaphor sections that are already labeled as such (e.g. '[INF]', 'operator's own words', family-metaphor sections). Do not flag plain factual corrections, status updates, or citations of real command output. Input: $ARGUMENTS",
+            "continueOnBlock": true
+          }
+        ]
+      }
+    ]
+  }
+}

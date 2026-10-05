@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/shaders">
+        <file alias="qml/compositor/colorwheel.frag.qsb">colorwheel.frag.qsb</file>
+    </qresource>
+</RCC>

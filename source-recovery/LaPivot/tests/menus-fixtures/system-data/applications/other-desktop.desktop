@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Other Desktop App
+Exec=record-app other
+OnlyShowIn=OtherDesktop;
+Categories=Utility;

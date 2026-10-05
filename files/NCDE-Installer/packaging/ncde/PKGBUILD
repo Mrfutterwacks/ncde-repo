@@ -1,0 +1,35 @@
+# NCDE — the whole desktop patch, delivered by pacman.
+# publish.sh copies the current ncde-full-patch-20260711.sh in as
+# ncde-full-patch.sh and sets pkgver; nothing here needs editing per release.
+pkgname=ncde
+pkgver=2026.10.04.1608
+pkgrel=1
+pkgdesc="NCDE desktop — updates with the system through NCDE Command"
+arch=('x86_64')
+license=('custom')
+depends=('bash' 'pacman-contrib' 'libnotify' 'dunst' 'jq' 'libsecret' 'qt6-webengine' 'ncde-qpa')
+optdepends=('timeshift: Soundings snapshot before each NCDE update')
+install=ncde.install
+source=('ncde-full-patch.sh' 'ncde-apply' 'ncde-apply.service' '95-ncde-apply.hook'
+        'ncde-snapshot' '05-ncde-snapshot.hook' 'ncde-rollback'
+        'ncde-update-check' 'ncde-update-check.service' 'ncde-update-check.timer'
+        'ncde-libguard' '04-ncde-libguard.hook' '96-ncde-libguard.hook' 'ncde-compat.conf')
+sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')
+
+package() {
+  local d="$pkgdir/usr/lib/ncde-update"
+  install -Dm755 ncde-full-patch.sh "$d/ncde-full-patch.sh"
+  install -Dm755 -t "$d" ncde-apply ncde-snapshot ncde-update-check ncde-libguard
+  # libguard: an Arch update can never take a library NCDE's programs need
+  install -Dm644 -t "$pkgdir/usr/share/libalpm/hooks" 04-ncde-libguard.hook 96-ncde-libguard.hook
+  install -Dm644 ncde-compat.conf "$pkgdir/etc/ld.so.conf.d/ncde-compat.conf"
+  install -d "$pkgdir/usr/lib/ncde-compat"
+  install -Dm755 ncde-rollback "$pkgdir/usr/bin/ncde-rollback"
+  install -Dm644 ncde-apply.service "$pkgdir/usr/lib/systemd/system/ncde-apply.service"
+  install -Dm644 95-ncde-apply.hook "$pkgdir/usr/share/libalpm/hooks/95-ncde-apply.hook"
+  install -Dm644 05-ncde-snapshot.hook "$pkgdir/usr/share/libalpm/hooks/05-ncde-snapshot.hook"
+  install -Dm644 -t "$pkgdir/usr/lib/systemd/user" ncde-update-check.service ncde-update-check.timer
+  # on for every user, no per-user enable step
+  install -d "$pkgdir/usr/lib/systemd/user/timers.target.wants"
+  ln -s ../ncde-update-check.timer "$pkgdir/usr/lib/systemd/user/timers.target.wants/ncde-update-check.timer"
+}

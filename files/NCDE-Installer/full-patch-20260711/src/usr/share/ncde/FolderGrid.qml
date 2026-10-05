@@ -1,0 +1,408 @@
+// FolderGrid.qml — Orchidée grid/icon view mode.
+// Folder and file icons use NCDE's MuchaAppIcon (Mucha art nouveau Canvas icons).
+// Real image thumbnails are shown for image files only.
+// Drag-and-drop (2026-07-06, Thunar model): every tile drags (ghost pill);
+// folder tiles accept drops → orchidee.moveTo(). Same pattern as MillerColumn.
+import QtQuick 2.15
+import "ncde-color.js" as Col
+import QtQuick.Window 2.15
+
+Item {
+    id: fgrid
+    property string dirPath:      ""
+    property string selectedFile: ""
+
+    signal openDir(string path)
+    signal pickFile(string path)
+    signal acted(string kind)
+    signal moveRequested(string path)
+    signal moved(string name)
+    // 2026-07-07 UX pack — context-menu verbs handled by OrchideeApp
+    signal renameRequested(string path)
+    signal cutRequested(string path)
+    signal copyRequested(string path)
+    signal tossRequested(string path)
+    // cut/copy → paste into another folder (2026-09-24): Paste lives in the
+    // right-click menu, on a folder ("Paste Into Folder") or on empty space.
+    signal pasteRequested(string destDir)
+    property bool canPaste: false        // bound from OrchideeApp: something is on the tray
+    property bool menuIsDir: false
+
+    // type-ahead find: start typing → jump to the first name match
+    focus: true
+    property string typeBuf: ""
+    Timer { id: typeBufReset; interval: 900; onTriggered: fgrid.typeBuf = "" }
+    Keys.onPressed: function(event) {
+        if (!event.text || event.text.length !== 1 || event.text < " ") return
+        typeBuf += event.text.toLowerCase()
+        typeBufReset.restart()
+        for (var i = 0; i < rows.length; i++) {
+            if (rows[i].name.toLowerCase().indexOf(typeBuf) === 0) {
+                selectedFile = rows[i].path
+                if (!rows[i].isDir) pickFile(rows[i].path)
+                gv.positionViewAtIndex(i, GridView.Contain)
+                break
+            }
+        }
+        event.accepted = true
+    }
+
+    function dropOk(src, destDir) {
+        if (!src || !src.dragPath || src.dragPath === destDir) return false
+        if (orchidee.parentOf(src.dragPath) === destDir) return false
+        if (src.dragIsDir && (destDir + "/").indexOf(src.dragPath + "/") === 0) return false
+        return true
+    }
+
+    property string menuPath: ""
+    function openContextMenu(path, x, y) {
+        fgrid.menuPath = path
+        fgrid.menuIsDir = false
+        for (var i = 0; i < fgrid.rows.length; i++)
+            if (fgrid.rows[i].path === path) { fgrid.menuIsDir = fgrid.rows[i].isDir === true; break }
+        gridCtxMenu.x = Math.max(2, Math.min(x, fgrid.width  - gridCtxMenu.width  - 2))
+        gridCtxMenu.y = Math.max(2, Math.min(y, fgrid.height - gridCtxMenu.height - 2))
+        gridCtxMenu.visible = true
+    }
+    function closeContextMenu() { gridCtxMenu.visible = false; fgrid.menuPath = "" }
+
+    NCDEKit { id: k }
+    // menu text on the cream card: palette ink pushed to 7:1 against it
+    // (dark palettes gave cream-on-cream, unreadable — 2026-09-24)
+    readonly property color menuInk: Col.readable(k.ink, k.surfaceHi, 7.0)
+    // right-click on empty space (no tile under the pointer) → Paste here
+    TapHandler {
+        acceptedButtons: Qt.RightButton
+        onTapped: (eventPoint) => {
+            var lp = gv.mapFromItem(null, eventPoint.scenePosition.x, eventPoint.scenePosition.y)
+            if (gv.indexAt(lp.x + gv.contentX, lp.y + gv.contentY) !== -1 || !fgrid.canPaste) return
+            var p = fgrid.mapFromItem(null, eventPoint.scenePosition.x, eventPoint.scenePosition.y)
+            fgrid.openContextMenu("", p.x, p.y)
+        }
+    }
+    readonly property color goldDeep: k.gilt1
+    readonly property color gold:     Qt.rgba(240/255,210/255,122/255,1)
+    readonly property color gold1:    k.gilt0
+    readonly property color burg4:    k.wine4
+    readonly property color ink:      k.ink
+    readonly property color cream:    k.surfaceHi
+
+    property bool showHidden: false      // bound from OrchideeApp (Ctrl+H)
+    onShowHiddenChanged: reload()
+    property var rows: []
+    function reload() {
+        rows = orchidee.entries(dirPath, showHidden).slice().sort(function(a, b) {
+            // Thunar order: folders first, then names A→Z ignoring case
+            if (a.isDir !== b.isDir) return a.isDir ? -1 : 1
+            return a.name.toLowerCase().localeCompare(b.name.toLowerCase())
+        })
+    }
+    Component.onCompleted: reload()
+    onDirPathChanged: { selectedFile = ""; reload() }
+
+    Connections {
+        target: orchidee
+        function onChanged(p) { if (p === fgrid.dirPath) fgrid.reload() }
+    }
+
+    Row {
+        anchors.fill: parent
+
+        GridView {
+            id: gv
+            width: fgrid.selectedFile !== "" ? parent.width - 240 : parent.width
+            height: parent.height
+            clip: true
+            boundsBehavior: GridView.StopAtBounds
+            // Thunar-style even spread: as many 124px columns as fit, then share
+            // the leftover width between them so the grid fills the pane edge to
+            // edge instead of leaving a ragged gap on the right.
+            leftMargin: 8; rightMargin: 8; topMargin: 8; bottomMargin: 8
+            readonly property int cols: Math.max(1, Math.floor((width - 16) / 124))
+            cellWidth: Math.floor((width - 16) / cols)
+            cellHeight: 142
+            model: fgrid.rows
+
+            delegate: Item {
+                id: cell
+                width: gv.cellWidth; height: gv.cellHeight
+                readonly property bool sel: modelData.path === fgrid.selectedFile
+
+                // Top-aligned (not centred) so every icon in a row sits on the same
+                // line whether its name takes one line or two.
+                Column {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.top: parent.top; anchors.topMargin: 8
+                    spacing: 6
+
+                    Item {
+                        // centred over the name: the label is wider than the icon,
+                        // and left-pinned the icon sat 16px left of its own name
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        width: 80; height: 80
+
+                        // MuchaAppIcon for folders
+                        MuchaAppIcon {
+                            visible: modelData.isDir
+                            width: 80; height: 80
+                            size: 80
+                            iconCategory: "place"
+                            appName: modelData.name
+                            accentColor: fgrid.burg4
+                            glowColor: fgrid.gold
+                        }
+
+                        // MuchaAppIcon for non-image files
+                        MuchaAppIcon {
+                            visible: !modelData.isDir && modelData.kind !== "img"
+                            width: 80; height: 80
+                            size: 80
+                            iconCategory: "mime"
+                            mimeType: fgrid.mimeForKind(modelData.kind)
+                            fileExtension: modelData.name.split('.').slice(-1)[0]
+                            accentColor: fgrid.burg4
+                            glowColor: fgrid.gold
+                        }
+
+                        // Real thumbnail for image files
+                        Rectangle {
+                            visible: !modelData.isDir && modelData.kind === "img"
+                            width: 80; height: 80
+                            radius: 8
+                            color: fgrid.cream
+                            border.width: 1; border.color: fgrid.goldDeep
+                            layer.enabled: true
+                            Image {
+                                anchors.fill: parent; anchors.margins: 1
+                                source: (!modelData.isDir && modelData.kind === "img")
+                                        ? ("file://" + modelData.path) : ""
+                                fillMode: Image.PreserveAspectCrop
+                                asynchronous: true; cache: true
+                            }
+                        }
+
+                        // Selection / hover / drop highlight overlay
+                        Rectangle {
+                            visible: cell.sel || cellHov.hovered
+                                     || (cellDrop.enabled && cellDrop.containsDrag)
+                            anchors.fill: parent
+                            radius: 8
+                            color: "transparent"
+                            border.width: (cell.sel || (cellDrop.enabled && cellDrop.containsDrag)) ? 2 : 1.5
+                            border.color: cell.sel ? fgrid.burg4 : fgrid.gold
+                        }
+                    }
+
+                    Text {
+                        width: gv.cellWidth - 12
+                        horizontalAlignment: Text.AlignHCenter
+                        wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                        maximumLineCount: 2
+                        elide: Text.ElideRight
+                        text: modelData.name
+                        font.family: theme.fontFamily; font.weight: settings.fontWeight; font.italic: settings.fontItalic; font.letterSpacing: theme.letterSpacing
+                        font.pixelSize: theme.fontSmall
+                        color: cell.sel ? fgrid.burg4 : fgrid.ink
+                    }
+                }
+
+                // folder tiles catch dragged items (Thunar move)
+                DropArea {
+                    id: cellDrop
+                    anchors.fill: parent
+                    enabled: modelData.isDir === true
+                    onDropped: {
+                        // a bin item dragged out → restore it INTO this folder
+                        if (drag.source && drag.source.dragBinName) {
+                            if (binnieTrash.restoreTo(drag.source.dragBinName, modelData.path))
+                                fgrid.moved(drag.source.dragBinName)
+                            return
+                        }
+                        if (!fgrid.dropOk(drag.source, modelData.path)) return
+                        var nm = orchidee.baseName(drag.source.dragPath)
+                        if (orchidee.moveTo(drag.source.dragPath, modelData.path)) fgrid.moved(nm)
+                    }
+                }
+                // drag ghost — parchment pill floating above the whole window
+                Item {
+                    id: cellDragProxy
+                    parent: cell.Window.window ? cell.Window.window.contentItem : cell
+                    z: 5000
+                    width: 170; height: 30
+                    visible: cellDragH.active
+                    Drag.active: cellDragH.active
+                    Drag.hotSpot: Qt.point(width / 2, height / 2)
+                    property string dragPath: modelData.path
+                    property bool   dragIsDir: modelData.isDir === true
+                    Rectangle {
+                        anchors.fill: parent; radius: 7
+                        color: fgrid.cream; border.color: fgrid.goldDeep; border.width: 1.5
+                        opacity: 0.94
+                        Row {
+                            anchors.fill: parent; anchors.leftMargin: 9
+                            spacing: 6
+                            Text { anchors.verticalCenter: parent.verticalCenter
+                                   text: modelData.isDir ? "▸" : "▤"
+                                   color: fgrid.goldDeep; font.pixelSize: theme.fontSmall }
+                            Text { anchors.verticalCenter: parent.verticalCenter
+                                   width: parent.width - 34; elide: Text.ElideRight
+                                   text: modelData.name; color: fgrid.ink
+                                   font.family: theme.fontFamily; font.weight: settings.fontWeight; font.italic: settings.fontItalic; font.letterSpacing: theme.letterSpacing; font.pixelSize: theme.fontSmall }
+                        }
+                    }
+                }
+                DragHandler {
+                    id: cellDragH
+                    target: cellDragProxy
+                    onActiveChanged: {
+                        if (active) {
+                            var sp = centroid.scenePosition
+                            cellDragProxy.x = sp.x - cellDragProxy.width / 2
+                            cellDragProxy.y = sp.y - cellDragProxy.height / 2
+                        } else {
+                            cellDragProxy.Drag.drop()
+                        }
+                    }
+                }
+                HoverHandler { id: cellHov }
+                TapHandler {
+                    onTapped: {
+                        if (modelData.isDir) {
+                            fgrid.selectedFile = ""
+                            fgrid.openDir(modelData.path)
+                            fgrid.acted("open")
+                        } else {
+                            fgrid.selectedFile = modelData.path
+                            fgrid.pickFile(modelData.path)
+                            fgrid.acted("select")
+                        }
+                    }
+                }
+                TapHandler {
+                    acceptedButtons: Qt.RightButton
+                    onTapped: (eventPoint) => {
+                        var p = fgrid.mapFromItem(null, eventPoint.scenePosition.x, eventPoint.scenePosition.y)
+                        fgrid.openContextMenu(modelData.path, p.x, p.y)
+                    }
+                }
+            }
+        }
+
+        FilePreview {
+            visible: fgrid.selectedFile !== ""
+            width: 240
+            height: parent.height
+            path: fgrid.selectedFile
+        }
+    }
+
+    function mimeForKind(kind) {
+        if (kind === "music") return "audio"
+        if (kind === "video") return "video"
+        return ""
+    }
+
+    // dismiss layer — left-click outside menu closes it
+    Item {
+        anchors.fill: parent
+        visible: gridCtxMenu.visible
+        z: 1999
+        TapHandler { acceptedButtons: Qt.LeftButton; onTapped: fgrid.closeContextMenu() }
+    }
+
+    Rectangle {
+        id: gridCtxMenu
+        visible: false; z: 2000
+        width: 140
+        height: gridCtxCol.implicitHeight + 8
+        radius: 8
+        color: fgrid.cream
+        border.color: fgrid.goldDeep; border.width: 1
+
+        Rectangle {
+            anchors.fill: parent; anchors.topMargin: 2; anchors.leftMargin: 2
+            z: -1; radius: parent.radius; color: Qt.rgba(0, 0, 0, 0.28)
+        }
+
+        Column {
+            id: gridCtxCol
+            x: 4; y: 4
+            width: parent.width - 8; spacing: 0
+
+            Item {
+                visible: fgrid.menuPath !== ""
+                width: parent.width; height: 28
+                Rectangle {
+                    anchors.fill: parent; radius: 6
+                    color: gCtxHov.hovered ? Qt.rgba(139/255, 30/255, 63/255, 0.85) : "transparent"
+                }
+                Rectangle {
+                    visible: gCtxHov.hovered
+                    anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom
+                    anchors.margins: 3; width: 2; radius: 1; color: fgrid.gold
+                }
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.left: parent.left; anchors.leftMargin: 12
+                    text: "Move To…"
+                    color: gCtxHov.hovered ? fgrid.cream : fgrid.menuInk
+                    font.family: theme.fontFamily; font.weight: settings.fontWeight; font.italic: settings.fontItalic; font.letterSpacing: theme.letterSpacing; font.pixelSize: theme.fontMedium
+                }
+                HoverHandler { id: gCtxHov }
+                TapHandler {
+                    onTapped: {
+                        var path = fgrid.menuPath
+                        fgrid.closeContextMenu()
+                        if (path !== "") fgrid.moveRequested(path)
+                    }
+                }
+            }
+
+            // 2026-07-07 UX pack — Rename / Cut / Copy / Toss (Thunar-class verbs)
+            Repeater {
+                model: [
+                    { label: "Rename…",     sig: "rename" },
+                    { label: "Cut",         sig: "cut" },
+                    { label: "Copy",        sig: "copy" },
+                    { label: "Toss to Bin", sig: "toss" },
+                    { label: "Paste",       sig: "paste" }
+                ]
+                Item {
+                    visible: modelData.sig === "paste" ? fgrid.canPaste : fgrid.menuPath !== ""
+                    width: parent.width; height: 28
+                    Rectangle {
+                        anchors.fill: parent; radius: 6
+                        color: gxCtxHov.hovered ? Qt.rgba(139/255, 30/255, 63/255, 0.85) : "transparent"
+                    }
+                    Rectangle {
+                        visible: gxCtxHov.hovered
+                        anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom
+                        anchors.margins: 3; width: 2; radius: 1; color: fgrid.gold
+                    }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.left: parent.left; anchors.leftMargin: 12
+                        text: modelData.sig === "paste" && fgrid.menuIsDir ? "Paste Into Folder" : modelData.label
+                        color: gxCtxHov.hovered ? fgrid.cream : fgrid.menuInk
+                        font.family: theme.fontFamily; font.weight: settings.fontWeight; font.italic: settings.fontItalic; font.letterSpacing: theme.letterSpacing; font.pixelSize: theme.fontMedium
+                    }
+                    HoverHandler { id: gxCtxHov }
+                    TapHandler {
+                        onTapped: {
+                            var path = fgrid.menuPath
+                            var sig = modelData.sig
+                            var wasDir = fgrid.menuIsDir
+                            fgrid.closeContextMenu()
+                            if (sig === "paste") { fgrid.pasteRequested(wasDir ? path : fgrid.dirPath); return }
+                            if (path === "") return
+                            if (sig === "rename") fgrid.renameRequested(path)
+                            else if (sig === "cut")  fgrid.cutRequested(path)
+                            else if (sig === "copy") fgrid.copyRequested(path)
+                            else if (sig === "toss") fgrid.tossRequested(path)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

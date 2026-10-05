@@ -1,0 +1,7 @@
+[Unit]
+Description=Watch NCDE network.json and re-apply the proxy
+[Path]
+PathChanged=%h/.config/ncde/network.json
+Unit=ncde-proxy.service
+[Install]
+WantedBy=default.target

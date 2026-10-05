@@ -1,0 +1,272 @@
+class Lelan : public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(QVariantMap network READ ? NOTIFY networkChanged)
+    Q_PROPERTY(QVariantMap vpn READ ? NOTIFY vpnStateChanged)
+    Q_PROPERTY(bool wifiEnabled READ ? NOTIFY wifiChanged)
+    Q_PROPERTY(QVariantList wifiNetworks READ ? NOTIFY wifiChanged)
+    Q_PROPERTY(QVariantMap activeNetwork READ ? NOTIFY wifiChanged)
+    Q_PROPERTY(QVariantList vpnConnections READ ? NOTIFY vpnStateChanged)
+    Q_PROPERTY(QVariantList users READ ? NOTIFY usersChanged)
+    Q_PROPERTY(QString userName READ ? NOTIFY userNameChanged)
+    Q_PROPERTY(QVariantList printers READ ? NOTIFY printersChanged)
+    Q_PROPERTY(QVariantMap battery READ ? NOTIFY batteryChanged)
+    Q_PROPERTY(QString powerProfile READ ? NOTIFY powerProfileChanged)
+    Q_PROPERTY(int thermalPressure READ ? NOTIFY thermalPressureChanged)
+    Q_PROPERTY(QVariantMap sentinelTemps READ ? NOTIFY sentinelTempsChanged)
+    Q_PROPERTY(QVariantMap sentinelFans READ ? NOTIFY sentinelFansChanged)
+    Q_PROPERTY(QVariantMap audio READ ? NOTIFY audioChanged)
+    Q_PROPERTY(int volume READ ? NOTIFY onAudioVolumeUpdated)
+    Q_PROPERTY(int balance READ ? NOTIFY audioChanged)
+    Q_PROPERTY(bool muted READ ? NOTIFY onAudioMuteUpdated)
+    Q_PROPERTY(QVariantList appStreams READ ? NOTIFY appStreamsChanged)
+    Q_PROPERTY(QVariantList outputDevices READ ? NOTIFY audioDevicesChanged)
+    Q_PROPERTY(QVariantList inputDevices READ ? NOTIFY audioDevicesChanged)
+    Q_PROPERTY(QString defaultSourceName READ ? NOTIFY audioDeviceChanged)
+    Q_PROPERTY(QVariantMap media READ ? NOTIFY mediaChanged)
+    Q_PROPERTY(bool mediaActive READ ? NOTIFY mediaChanged)
+    Q_PROPERTY(QVariantMap bluetooth READ ? NOTIFY bluetoothChanged)
+    Q_PROPERTY(bool bluetoothEnabled READ ? NOTIFY bluetoothChanged)
+    Q_PROPERTY(bool bluetoothDiscoverable READ ? NOTIFY bluetoothChanged)
+    Q_PROPERTY(QVariantList bluetoothDevices READ ? NOTIFY bluetoothChanged)
+    Q_PROPERTY(QVariantMap bluetoothAudioDevice READ ? NOTIFY bluetoothAudioDeviceChanged)
+    Q_PROPERTY(QVariantList removableVolumes READ ? NOTIFY storageChanged)
+    Q_PROPERTY(QVariantMap disk READ ? NOTIFY diskChanged)
+    Q_PROPERTY(QVariantMap updates READ ? NOTIFY packageStateChanged)
+    Q_PROPERTY(bool darkMode READ ? NOTIFY darkModeChanged)
+    Q_PROPERTY(QString accentColor READ ? NOTIFY onAccentColorChanged)
+    Q_PROPERTY(QString systemFont READ ? NOTIFY systemFontChanged)
+    Q_PROPERTY(QVariantMap filigreePalette READ ? NOTIFY filigreePalettesChanged)
+    Q_PROPERTY(QVariantMap location READ ? NOTIFY placeNameChanged)
+    Q_PROPERTY(QString placeName READ ? NOTIFY placeNameChanged)
+    Q_PROPERTY(QVariantMap clock READ ? NOTIFY clockChanged)
+    Q_PROPERTY(QString timezone READ ? NOTIFY timezoneChanged)
+    Q_PROPERTY(bool locating READ ? NOTIFY timezoneChanged)
+    Q_PROPERTY(QVariantList tray READ ? NOTIFY trayChanged)
+    Q_PROPERTY(bool sessionActive READ ? NOTIFY onSessionActiveChanged)
+    Q_PROPERTY(int vtActive READ ? NOTIFY vtActiveChanged)
+    Q_PROPERTY(bool screensaver READ ? NOTIFY screensaverChanged)
+    Q_PROPERTY(QString hostname READ ? NOTIFY hostnameChanged)
+    Q_PROPERTY(QString locale READ ? NOTIFY localeChanged)
+    Q_PROPERTY(QVariantMap kickass READ ? NOTIFY kickassStatusChanged)
+    Q_PROPERTY(QVariantList notifications READ ? NOTIFY notificationsChanged)
+    Q_PROPERTY(int animLevel READ ? NOTIFY animLevelChanged)
+    Q_PROPERTY(bool reduceMotion READ ? NOTIFY animLevelChanged)
+    Q_PROPERTY(QString hardwareTier READ ? NOTIFY hardwareTierChanged)
+    Q_PROPERTY(double batteryPercent READ ? NOTIFY batteryChanged)
+    Q_PROPERTY(bool batteryCharging READ ? NOTIFY batteryChanged)
+    Q_PROPERTY(bool hasBattery READ ? NOTIFY batteryChanged)
+    Q_PROPERTY(bool networkOnline READ ? NOTIFY networkChanged)
+    Q_PROPERTY(bool networkUp READ ? NOTIFY networkChanged)
+    Q_PROPERTY(QString mediaTitle READ ? NOTIFY mediaChanged)
+    Q_PROPERTY(QString mediaArtist READ ? NOTIFY mediaChanged)
+    Q_PROPERTY(QString mediaAlbum READ ? NOTIFY mediaChanged)
+    Q_PROPERTY(QString mediaArtUrl READ ? NOTIFY mediaChanged)
+    Q_PROPERTY(QString mediaTrackId READ ? NOTIFY mediaChanged)
+    Q_PROPERTY(qlonglong mediaDuration READ ? NOTIFY mediaChanged)
+    Q_PROPERTY(qlonglong mediaPosition READ ? NOTIFY mediaPositionChanged)
+    Q_PROPERTY(bool mediaPlaying READ ? NOTIFY mediaChanged)
+    Q_PROPERTY(QVariantMap systemInfo READ ? NOTIFY systemInfoChanged)
+    Q_PROPERTY(QVariantMap wiredNetwork READ ? NOTIFY networkChanged)
+    Q_PROPERTY(bool bluetoothScanning READ ? NOTIFY bluetoothChanged)
+    Q_PROPERTY(QVariantMap bluetoothPairing READ ? NOTIFY bluetoothPairingChanged)
+    Q_PROPERTY(bool lidClosed READ ? NOTIFY lidClosedChanged)
+    signal:     public void networkChanged();
+    signal:     public void vpnStateChanged();
+    signal:     public void wifiChanged();
+    signal:     public void batteryChanged();
+    signal:     public void powerProfileChanged();
+    signal:     public void powerChanged();
+    signal:     public void thermalPressureChanged();
+    signal:     public void sentinelTempsChanged();
+    signal:     public void sentinelFansChanged();
+    signal:     public void driverMissing(QString device, QString modalias, QString suggestedModule);
+    signal:     public void statsChanged();
+    signal:     public void audioChanged();
+    signal:     public void audioDeviceChanged();
+    signal:     public void audioDevicesChanged();
+    signal:     public void inputDevicesChanged();
+    signal:     public void bluetoothAudioDeviceChanged();
+    signal:     public void onAudioVolumeUpdated();
+    signal:     public void onAudioMuteUpdated();
+    signal:     public void onFallbackSinkUpdated();
+    signal:     public void appStreamsChanged();
+    signal:     public void mediaChanged();
+    signal:     public void mediaPositionChanged();
+    signal:     public void appNameChanged();
+    signal:     public void appIconChanged();
+    signal:     public void durationChanged();
+    signal:     public void bluetoothChanged();
+    signal:     public void diskChanged();
+    signal:     public void diskDeviceChanged();
+    signal:     public void diskMountChanged();
+    signal:     public void storageChanged();
+    signal:     public void kickassChanged();
+    signal:     public void kickassStatusChanged();
+    signal:     public void kickassSiteBlocked(QString domain, QString detail);
+    signal:     public void kickassThreatBlocked(QString app, QString detail, int severity);
+    signal:     public void kickassThreatBehavioral(QString subject, QString detail, QString kind);
+    signal:     public void kickassNetworkAlert(QString src, QString detail);
+    signal:     public void packageStateChanged();
+    signal:     public void updatesChanged();
+    signal:     public void clockChanged();
+    signal:     public void timeJumped();
+    signal:     public void pulse(qulonglong tick);
+    signal:     public void leanSleeping();
+    signal:     public void leanWaking();
+    signal:     public void dateTimeChanged();
+    signal:     public void timezoneChanged();
+    signal:     public void weatherChanged();
+    signal:     public void placeNameChanged();
+    signal:     public void moonPositionChanged();
+    signal:     public void trayChanged();
+    signal:     public void onTrayBadgeChanged();
+    signal:     public void onTrayPercentChanged();
+    signal:     public void themeChanged();
+    signal:     public void darkModeChanged();
+    signal:     public void onAccentColorChanged();
+    signal:     public void wallpaperChanged();
+    signal:     public void systemFontChanged();
+    signal:     public void slideshowChanged();
+    signal:     public void filigreePalettesChanged();
+    signal:     public void onSessionActiveChanged();
+    signal:     public void vtActiveChanged();
+    signal:     public void screensaverChanged();
+    signal:     public void screenConfigChanged();
+    signal:     public void screenGeometryChanged();
+    signal:     public void hostnameChanged();
+    signal:     public void localeChanged();
+    signal:     public void userNameChanged();
+    signal:     public void usersChanged();
+    signal:     public void printersChanged();
+    signal:     public void notificationsChanged();
+    signal:     public void animLevelChanged();
+    signal:     public void hardwareTierChanged();
+    signal:     public void systemInfoChanged();
+    signal:     public void wifiConnectFailed(QString ssid, QString reason);
+    signal:     public void vpnImportFinished(bool ok, QString message);
+    signal:     public void bluetoothPairingChanged();
+    signal:     public void bluetoothFailed(QString address, QString reason);
+    signal:     public void volumeFailed(QString path, QString reason);
+    signal:     public void volumeEjected(QString label);
+    signal:     public void lidClosedChanged(bool closed);
+    slot:       public void onWMScreenConfig(int, int);
+    slot:       public void onWindowTierNeeded(uint pid, QString tier);
+    slot:       public void onWindowClosed(uint pid);
+    slot:       public void applyProperties(QVariantMap m);
+    slot:       public void fetchAndApply(QString key);
+    slot:       public void mediaPlayPause();
+    slot:       public void mediaNext();
+    slot:       public void mediaPrevious();
+    slot:       public void mediaSeek(qlonglong positionUs);
+    slot:       public void setVolume(int v);
+    slot:       public void toggleMute();
+    slot:       public void setBalance(int v);
+    slot:       public void setAppVolume(QString name, int volumePct);
+    slot:       public void setOutputDevice(QString name);
+    slot:       public void setInputDevice(QString name);
+    slot:       public void setWifiEnabled(bool on);
+    slot:       public void connectWifi(QString ssid, QString password);
+    slot:       public void disconnectWifi();
+    slot:       public void connectVpn(QString name);
+    slot:       public void disconnectVpn(QString name);
+    slot:       public void setBluetoothEnabled(bool on);
+    slot:       public void setBluetoothDiscoverable(bool on);
+    slot:       public void bluetoothConnect(QString address);
+    slot:       public void bluetoothDisconnect(QString address);
+    slot:       public void bluetoothPair(QString address);
+    slot:       public void bluetoothRemove(QString address);
+    slot:       public void bluetoothScan();
+    slot:       public void setTimezone(QString zone);
+    slot:       public void setNtp(bool on);
+    slot:       public void refreshLocation();
+    slot:       public void addUser(QString name, QString displayName, bool isAdmin);
+    slot:       public void removeUser(QString name);
+    slot:       public void setUserAdmin(QString name, bool admin);
+    slot:       public void changePassword(QString name, QString pwd);
+    slot:       public void setAutoLogin(QString name, bool on);
+    slot:       public void setAutoLogin(QString name);
+    slot:       public void setUserAvatar(QString name, QString file);
+    slot:       public void setDefaultPrinter(QString name);
+    slot:       public void removePrinter(QString name);
+    slot:       public void mountVolume(QString objectPath);
+    slot:       public void unmountVolume(QString objectPath);
+    slot:       public void setAnimUtilClamp(bool boost);
+    slot:       public void setReduceMotionPref(bool on);
+    slot:       public void retryFallbackSink();
+    slot:       private void onNameOwnerChanged(QString name, QString oldOwner, QString newOwner);
+    slot:       private void onSystemNameOwnerChanged(QString name, QString oldOwner, QString newOwner);
+    slot:       private void onCoalescedTick();
+    slot:       private void onPulse();
+    slot:       private void recomputeAnimLevel();
+    slot:       private void drainIdleQueue();
+    slot:       private void onNetworkStateChanged(uint state);
+    slot:       private void onNmPropertiesChanged(QString iface, QVariantMap changed, QStringList inval);
+    slot:       private void onVpnStateChanged(uint state, uint reason);
+    slot:       private void onWifiPropertiesChanged(QString iface, QVariantMap changed, QStringList inval);
+    slot:       private void onBatteryPropertiesChanged(QString iface, QVariantMap changed, QStringList inval);
+    slot:       private void onBlueZInterfacesAdded(QDBusObjectPath path, BlueZInterfaceMap ifaces);
+    slot:       private void onBlueZInterfacesRemoved(QDBusObjectPath path, QStringList ifaces);
+    slot:       private void onBlueZPropertiesChanged(QString iface, QVariantMap changed, QStringList inval);
+    slot:       private void onUDisks2InterfacesAdded(QDBusObjectPath path, BlueZInterfaceMap ifaces);
+    slot:       private void onUDisks2InterfacesRemoved(QDBusObjectPath path, QStringList ifaces);
+    slot:       private void onUDisks2FilesystemPropertiesChanged(QString iface, QVariantMap changed, QStringList inval);
+    slot:       private void applyPulseState(int volume, bool muted, QString sink, uint sinkIndex, int channels);
+    slot:       private void applyAppStreams(QVariantList streams);
+    slot:       private void applyOutputDevices(QVariantList devs);
+    slot:       private void applyInputDevices(QVariantList devs);
+    slot:       private void applyDefaultSource(QString name);
+    slot:       private void onPowerProfilesPropertiesChanged(QString iface, QVariantMap changed, QStringList inval);
+    slot:       private void onPackageKitUpdatesChanged();
+    slot:       private void onPackageKitUpdatesPackage(uint info, QString packageId, QString summary);
+    slot:       private void onPackageKitUpdatesFinished(uint exit, uint runtime);
+    slot:       private void onPortalSettingChanged(QString ns, QString key, QDBusVariant value);
+    slot:       private void onLowMemoryWarning(uchar level);
+    slot:       private void onGeoClue2Location(QDBusObjectPath oldLoc, QDBusObjectPath newLoc);
+    slot:       private void onTimedate1PropertiesChanged(QString iface, QVariantMap changed, QStringList inval);
+    slot:       private void onHostname1PropertiesChanged(QString iface, QVariantMap changed, QStringList inval);
+    slot:       private void onLocale1PropertiesChanged(QString iface, QVariantMap changed, QStringList inval);
+    slot:       private void onSessionActiveChangedSlot(QString iface, QVariantMap changed, QStringList inval);
+    slot:       private void onSessionLock();
+    slot:       private void onSessionUnlock();
+    slot:       private void onPrepareForSleep(bool before);
+    slot:       private void onScreenSaverActivated(bool active);
+    slot:       private void onActionInvoked(uint id, QString action);
+    slot:       private void onPropertiesChanged(QString iface, QVariantMap changed, QStringList inval);
+    slot:       private void onAccountsPropertiesChanged(QString iface, QVariantMap changed, QStringList inval);
+    slot:       private void onAccountsUserAdded(QDBusObjectPath path);
+    slot:       private void onAccountsUserDeleted(QDBusObjectPath path);
+    slot:       private void onMprisSeeked(qlonglong positionUs);
+    slot:       private void onLayoutUpdated();
+    slot:       private void rebuildTray();
+    slot:       private void onTrayItemChanged();
+    slot:       private void onSentinelDisplayConnected(QString name);
+    slot:       private void onSentinelDisplayDisconnected(QString name);
+    slot:       private void onSentinelUsbDeviceAdded(QString id, QString name);
+    slot:       private void onSentinelUsbDeviceRemoved(QString id, QString name);
+    slot:       private void onSentinelInputDeviceAdded(QString name);
+    slot:       private void onSentinelInputDeviceRemoved(QString name);
+    slot:       private void onSentinelAudioDeviceChanged(QString id, QString name);
+    slot:       private void onSentinelBatteryStateChanged(bool onBattery, int percentage);
+    slot:       private void onSentinelNetworkStateChanged(QString iface, bool up);
+    slot:       private void onSentinelThermalChanged(SentinelTempMap temps);
+    slot:       private void onSentinelFanChanged(SentinelFanMap fans);
+    slot:       private void onSentinelThermalCritical(QString sensor, double tempC);
+    slot:       private void onSentinelDriverMissing(QString device, QString modalias, QString suggested);
+    slot:       private void onKickassStatusChanged(bool armed, int level);
+    slot:       private void onKickassThreatBlocked(QString app, QString detail, int severity);
+    slot:       private void onKickassThreatBehavioral(QString subject, QString detail, QString kind);
+    slot:       private void onKickassSiteBlocked(QString site, QString detail);
+    slot:       private void onKickassNetworkAlert(QString src, QString detail);
+    slot:       public void setAutoMountPref(bool on);
+    slot:       public void setLocationAllowed(bool on);
+    Q_INVOKABLE public QVariantMap loadConfig(QString name);
+    Q_INVOKABLE public bool saveConfig(QString name, QVariantMap data);
+    Q_INVOKABLE public qlonglong monoRawMs();
+    Q_INVOKABLE public void importVpn(QString file);
+    Q_INVOKABLE public void removeVpn(QString name);
+    Q_INVOKABLE public void bluetoothPairingReply(bool accept, QString value);
+    Q_INVOKABLE public void ejectVolume(QString path);
+    Q_INVOKABLE public void unlockVolume(QString path, QString passphrase);
+};
+

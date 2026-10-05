@@ -1,0 +1,5 @@
+/* NCDEEngine — wallpaper accent. Do not edit. */
+/* Shipped default accent. The engine regenerates this file LIVE (applyGtkAccent)
+   with the current Iris Chroma accent, wallpaper-mixed, on every change. */
+@define-color ncde_accent #6774bd;
+@define-color theme_selected_bg_color @ncde_accent;

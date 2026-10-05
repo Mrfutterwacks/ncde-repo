@@ -1,0 +1,21 @@
+[Unit]
+# ncde-zen-power.service — apply the Zen governor/dirty_ratio at boot.
+#
+# Target install path : /usr/lib/systemd/system/ncde-zen-power.service
+#                       (root:root 0644)
+#
+# The 90-ncde-zen.rules udev rule reacts to AC/battery *transitions*, but the
+# initial state at boot needs a one-shot so the governor is correct before any
+# plug/unplug event fires. zen.md §2 values are enforced by the helper.
+Description=NCDE Zen performance governor (cpufreq + vm.dirty_ratio)
+DefaultDependencies=no
+After=sysinit.target
+Before=multi-user.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/lib/ncde/ncde-zen-power.sh
+
+[Install]
+WantedBy=multi-user.target

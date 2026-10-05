@@ -1,0 +1,14 @@
+#!/bin/bash
+# verdantfolio — launch GiGi's résumé atelier (QML). Ensures her helper service is up
+# (advice library + LibreOffice + Hummingbird hand-off), then opens the UI. No LLM.
+HELPER=/usr/lib/ncde/verdantfolio
+UI=/usr/share/ncde/verdantfolio
+export QT_QPA_PLATFORM=xcb          # NCDE is X11
+
+if ! curl -s --max-time 2 "http://127.0.0.1:8078/advice?headline=x" >/dev/null 2>&1; then
+    systemctl --user start verdant-helper.service 2>/dev/null \
+        || ( cd "$HELPER" && python3 "$HELPER/verdant_server.py" >/dev/null 2>&1 & )
+    sleep 1
+fi
+
+exec qml6 -I "$UI" "$UI/Main.qml"

@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily NCDE rootkit scan for Vesper
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=24h
+RandomizedDelaySec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

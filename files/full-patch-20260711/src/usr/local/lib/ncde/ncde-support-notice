@@ -1,0 +1,48 @@
+#!/bin/bash
+# ncde-support-notice — the branded full-screen card shown on the emergency VT in
+# place of a Linux login prompt. NCDE's "never show a console" guarantee: if a
+# user ever lands on a text VT, they see a calm "please call support" card, never
+# a shell or login. Trained support has a SEPARATE, documented path to a root
+# shell (deliberately not implemented here).
+#
+# Install target: /usr/local/lib/ncde/ncde-support-notice  (run by the emergency
+# VT service instead of agetty). Placeholders below are filled by Stephen.
+#
+# Trained-support contact (NCDE Support line — not a personal contact).
+SUPPORT_NAME="NCDE Support"
+SUPPORT_CONTACT="(217) 219-5415"
+
+esc=$'\033'
+hide_cursor(){ printf '%s[?25l' "$esc"; }
+show_cursor(){ printf '%s[?25h' "$esc"; }
+clear_screen(){ printf '%s[2J%s[H' "$esc" "$esc"; }
+trap show_cursor EXIT
+
+while true; do
+    clear_screen
+    hide_cursor
+    cat <<CARD
+
+        ─────────────────────────────────────────────
+
+                     N C D E   P O S E I D O N
+
+        ─────────────────────────────────────────────
+
+
+            Your system needs a moment of attention.
+
+            The easiest fix:  hold  Ctrl + Alt + R
+            to open System Restore and roll back to a
+            working point — your files are kept safe.
+
+            If that does not help, please
+            contact your support technician.
+
+
+        ─────────────────────────────────────────────
+
+CARD
+    # Re-paint periodically; ignore stray keystrokes so nothing leaks a shell.
+    read -r -t 30 -n 1 _ 2>/dev/null || true
+done

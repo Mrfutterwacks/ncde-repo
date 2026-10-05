@@ -1,0 +1,72 @@
+{
+    "animSpeed": 198,
+    "apps": [
+        {
+            "exec": "/usr/local/bin/ncde-command",
+            "icon": "",
+            "name": "NCDECommand"
+        },
+        {
+            "exec": "ncde-chromium",
+            "icon": "",
+            "name": "Chromium"
+        },
+        {
+            "exec": "ncde-terminal",
+            "icon": "",
+            "name": "Terminal"
+        },
+        {
+            "exec": "gtk-launch com.valvesoftware.Steam",
+            "icon": "",
+            "name": "Steam"
+        },
+        {
+            "exec": "gtk-launch gimp",
+            "icon": "",
+            "name": "GIMP"
+        },
+        {
+            "exec": "libreoffice",
+            "icon": "",
+            "name": "LibreOffice"
+        },
+        {
+            "exec": "/usr/local/bin/orchidee",
+            "icon": "",
+            "name": "Orchidée"
+        },
+        {
+            "exec": "gtk-launch spotify",
+            "icon": "",
+            "name": "Spotify"
+        },
+        {
+            "exec": "/usr/local/bin/verve-text",
+            "icon": "",
+            "name": "Verve"
+        },
+        {
+            "exec": "/usr/local/bin/hummingbird-courier",
+            "icon": "",
+            "name": "Hummingbird Courier"
+        },
+        {
+            "exec": "/usr/local/bin/magpie-talker",
+            "icon": "",
+            "name": "Magpie Talker"
+        },
+        {
+            "exec": "/usr/local/bin/binnie",
+            "icon": "",
+            "name": "Binnie"
+        }
+    ],
+    "iconSize": 48,
+    "magDamping": 0.8,
+    "magMass": 2,
+    "magSpring": 12,
+    "spacing": 3,
+    "zoomPercent": 1.18,
+    "zoomRange": 96
+}

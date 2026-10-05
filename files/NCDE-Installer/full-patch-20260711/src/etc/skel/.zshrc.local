@@ -1,0 +1,10 @@
+# ~/.zshrc.local — NCDE user shell customisations.
+# grml's global zshrc (/etc/zsh/zshrc) sources this LAST, for every interactive shell.
+
+# Verda's greeting — run the NCDE fetch on every interactive terminal/tab (like neofetch).
+# Guards: interactive shell only, stdout is a real tty, and verdafetch is installed.
+# DISABLED 2026-07-12: ncde-terminal greets natively; this rc line duplicated it
+# (banner printed twice in the terminal). Left commented, not deleted.
+# if [[ -o interactive ]] && [[ -t 1 ]] && command -v verdafetch >/dev/null 2>&1; then
+#     verdafetch
+# fi

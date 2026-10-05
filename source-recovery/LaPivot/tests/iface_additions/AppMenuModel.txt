@@ -1,0 +1,5 @@
+# AppMenuModel interface additions (not in oracle metaobject)
+# These are plain C++ methods, not QObject meta-object members
+# oracle metaobject has: changed signal, reload/getCategories/getApps invokables
+
+# No additions needed - oracle interface is complete for QML binding

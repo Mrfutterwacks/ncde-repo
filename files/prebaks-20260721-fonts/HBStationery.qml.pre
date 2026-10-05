@@ -1,0 +1,172 @@
+// HBStationery.qml — Stationery Drawer for Hummingbird Courier.
+//
+// Native picker of letterhead sets (hb-stationery.js). Opens over compose;
+// each card is a live Canvas-drawn sheet with the user's name on the masthead.
+// Picking one emits picked(key); compose renders the body inside that letterhead.
+//
+//   HBStationery { id: stationeryDrawer; userName: mail.accountName; onPicked: ... }
+//   stationeryDrawer.open()
+import QtQuick
+import QtQuick.Controls
+import "hb-stationery.js" as Sta
+
+Item {
+    id: drawer
+    anchors.fill: parent
+    visible: false
+    z: 80
+
+    property string userName: ""
+    property string current: "damask"
+    signal picked(string key)
+
+    function open()  { visible = true; focus = true }
+    function close() { visible = false }
+
+    readonly property color gold: ncde.gilt2
+    readonly property color goldBr: ncde.gilt4
+    readonly property color ink: ncde.foreground
+
+    function monthName(m){ return ["January","February","March","April","May","June","July",
+        "August","September","October","November","December"][m] }
+    function today(){ var d=new Date(); return monthName(d.getMonth())+" "+d.getDate()+", "+d.getFullYear() }
+
+    // dim backdrop
+    Rectangle { anchors.fill: parent; color: Qt.rgba(20/255,14/255,24/255,0.78)
+        TapHandler { onTapped: drawer.close() } }
+
+    Rectangle {
+        anchors.centerIn: parent
+        width: Math.min(parent.width - 48, 900)
+        height: Math.min(parent.height - 48, 680)
+        radius: 14; color: ncde.surface; border.width: 1.5; border.color: drawer.gold
+        clip: true
+
+        Column {
+            anchors.fill: parent
+
+            // ── header: title + name field ──
+            Rectangle {
+                width: parent.width; height: 58; color: "transparent"
+                Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1.5; color: drawer.gold }
+                Text {
+                    anchors.left: parent.left; anchors.leftMargin: 20
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "✑  The Stationery Drawer"; color: drawer.goldBr
+                    font.family: theme.fontFamily; font.pixelSize: theme.scale(19)
+                }
+                Row {
+                    anchors.right: parent.right; anchors.rightMargin: 18
+                    anchors.verticalCenter: parent.verticalCenter; spacing: 8
+                    Text { text: "SIGNED"; color: drawer.gold; anchors.verticalCenter: parent.verticalCenter
+                           font.family: theme.fontFamily; font.pixelSize: theme.scale(10); font.letterSpacing: 1.5 }
+                    Rectangle {
+                        width: 190; height: 32; radius: 7
+                        color: Qt.rgba(1,0.99,0.95,0.08); border.width: 1.2; border.color: ncde.gilt0
+                        TextField {
+                            id: nameField
+                            anchors.fill: parent; anchors.leftMargin: 10
+                            verticalAlignment: TextInput.AlignVCenter
+                            text: drawer.userName
+                            placeholderText: "Your name…"
+                            background: null; color: ncde.surface
+                            font.family: theme.fontFamily; font.pixelSize: theme.scale(15)
+                            onTextChanged: drawer.userName = text
+                        }
+                    }
+                }
+            }
+
+            // ── scrollable rack ──
+            ScrollView {
+                width: parent.width; height: parent.height - 58
+                clip: true
+                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+
+                Flow {
+                    width: drawer.width > 0 ? Math.min(drawer.parent.width - 48, 900) - 28 : 860
+                    padding: 14; spacing: 16
+
+                    Repeater {
+                        model: Sta.SETS.length
+                        delegate: Column {
+                            id: card
+                            property var set: Sta.SETS[index]
+                            spacing: 5
+                            width: 196
+
+                            // the sheet
+                            Rectangle {
+                                width: 196; height: 254
+                                radius: 3; clip: true
+                                border.width: card.set.key === drawer.current ? 2.5 : 1
+                                border.color: card.set.key === drawer.current ? drawer.goldBr : "#3a3450"
+
+                                Canvas {
+                                    id: bg
+                                    anchors.fill: parent
+                                    renderStrategy: Canvas.Cooperative
+                                    onPaint: { var c=getContext("2d"); c.reset(); card.set.paint(c, width, height) }
+                                }
+                                // masthead + sample text overlay
+                                Column {
+                                    anchors.fill: parent
+                                    anchors.topMargin: 18
+                                    anchors.leftMargin: 196 * (card.set.bodyL || 0.2) + 10
+                                    anchors.rightMargin: 14; anchors.bottomMargin: 12
+                                    spacing: 2
+                                    Canvas {
+                                        width: 54; height: 34
+                                        renderStrategy: Canvas.Cooperative
+                                        onPaint: { var c=getContext("2d"); c.reset(); Sta.crestMark(c, width, height, card.set.nameC) }
+                                    }
+                                    Text {
+                                        width: parent.width; elide: Text.ElideRight
+                                        text: drawer.userName.length ? drawer.userName : "Your Name"
+                                        opacity: drawer.userName.length ? 1 : 0.4
+                                        color: card.set.nameC; font.family: theme.fontFamily
+                                        font.pixelSize: theme.scale(15); font.bold: true
+                                    }
+                                    Item { width: 1; height: 4 }
+                                    Text {
+                                        width: parent.width; text: drawer.today(); horizontalAlignment: Text.AlignRight
+                                        color: card.set.dark ? ncde.gilt5 : ncde.gilt1
+                                        font.family: theme.fontFamily; font.italic: true; font.pixelSize: theme.scale(9)
+                                    }
+                                    Text {
+                                        width: parent.width; text: card.set.sal
+                                        color: card.set.dark ? ncde.surfaceAlt : ncde.foreground
+                                        font.family: theme.fontFamily; font.italic: true; font.pixelSize: theme.scale(10)
+                                    }
+                                    Text {
+                                        width: parent.width; wrapMode: Text.WordWrap; maximumLineCount: 4; elide: Text.ElideRight
+                                        text: card.set.sal + "\n\nYour letter here…"
+                                        color: card.set.dark ? ncde.surfaceAlt : ncde.gilt0
+                                        font.family: theme.fontFamily; font.pixelSize: theme.scale(10); lineHeight: 0.95
+                                    }
+                                }
+                                TapHandler {
+                                    onTapped: { drawer.current = card.set.key; drawer.picked(card.set.key); drawer.close() }
+                                }
+                                HoverHandler { id: cardHov }
+                                Rectangle { anchors.fill: parent; radius: parent.radius; color: "transparent"
+                                    border.width: cardHov.hovered ? 2 : 0; border.color: drawer.gold }
+                            }
+                            // name + group
+                            Row {
+                                width: parent.width; spacing: 6
+                                Text { text: card.set.name; color: drawer.goldBr; font.family: theme.fontFamily
+                                       font.pixelSize: theme.scale(12); font.letterSpacing: 0.5 }
+                                Item { width: 2; height: 1 }
+                                Text { text: card.set.group; color: ncde.gilt1; font.family: theme.fontFamily
+                                       font.italic: true; font.pixelSize: theme.scale(11) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Keys.onEscapePressed: drawer.close()
+}

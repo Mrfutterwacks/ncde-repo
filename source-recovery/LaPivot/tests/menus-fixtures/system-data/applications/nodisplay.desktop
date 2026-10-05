@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=NoDisplay App
+Exec=record-app nodisplay
+Categories=Utility;
+NoDisplay=true

@@ -1,0 +1,14 @@
+# 90-ncde-zen.rules — RETIRED 2026-09-30 (intentionally contains no rules).
+#
+# This used to RUN+= /usr/local/lib/ncde/ncde-zen-power.sh on every power_supply "change"
+# uevent. On this hardware the battery controller emits one every ~3 s with nothing new, so
+# a root bash ran every 3 s, and — worse — it rewrote the cpufreq governor/EPP without
+# knowing about GameMode, undoing sentinel/gamemode.py's "performance" pin within seconds.
+#
+# zen.md: ONE writer. That is ncde-sentinel (a root system service since the rule was written):
+#   Sentinel BatteryStateChanged (emitted only on real change) -> Lelan (LaPivot) ->
+#   Sentinel.SetPowerProfile(on_battery) -> zen_hints.apply() + GameMode.reassert_governor().
+# Boot-time values: ncde-sentinel applies them at startup; ncde-zen-power.service stays as a
+# harmless boot one-shot.
+#
+# The file is kept (empty of rules) so updates overwrite the old active rule on every machine.

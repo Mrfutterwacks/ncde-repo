@@ -1,0 +1,23 @@
+[Unit]
+Description=NCDE live microphone peak bridge (default source peak -> JSON)
+# Opens a parec record stream on the default PulseAudio/PipeWire source and writes
+# the true input peak ~10x/sec to $XDG_RUNTIME_DIR/ncde-mic.json. Userspace only —
+# nothing near ncde-portal/logind/the WM.
+After=pipewire.service pipewire-pulse.service wireplumber.service
+Wants=pipewire-pulse.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/ncde-mic-helper
+Restart=always
+RestartSec=3
+Nice=5
+# Least privilege: it only needs the pulse socket (under %t) and to write its JSON.
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%t %C
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

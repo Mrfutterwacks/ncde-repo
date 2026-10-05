@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Missing Helper
+Exec=record-app missing
+TryExec=not-installed-by-menu-tests
+Categories=Utility;

@@ -1,0 +1,9 @@
+[Unit]
+Description=NCDE: watch ~/Applications for AppImages
+
+[Path]
+PathChanged=%h/Applications
+MakeDirectory=yes
+
+[Install]
+WantedBy=default.target

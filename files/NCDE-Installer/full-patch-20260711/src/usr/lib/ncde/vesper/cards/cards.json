@@ -1,0 +1,58 @@
+{
+  "version": 2,
+  "_note": "Tier-0 canned verdict cards. {slots} filled AT RUNTIME from the system, never hardcoded. EVERY line is a list of variants -> randomized + no-immediate-repeat = feels alive/dynamic without an LLM. The rendered card is also handed to the LLM as context if the user replies (seamless handoff). The 8b can AUTHOR these variants offline.",
+  "slots": {
+    "firstName": "session user's first name  <- getent passwd $USER GECOS / NCDE profile",
+    "orgName":   "congregation/family name  <- /etc/ncde/org.conf (set at install)",
+    "greeting":  "time-aware  <- system clock",
+    "process":   "offending process  <- engine event",
+    "location":  "human path  <- engine event",
+    "ago":       "how long ago  <- engine event",
+    "fileCount": "files touched  <- engine event"
+  },
+  "signatures": {
+    "_note": "exact-match: a substring of the engine's detection name -> a card key. NO embeddings, NO LLM.",
+    "Ransomware": "ransomware",
+    "Filecoder": "ransomware",
+    "Cryptolocker": "ransomware"
+  },
+  "faq": {
+    "_note": "scripted answers to known questions -> interactivity without the LLM.",
+    "ransomware": "Ransomware is malware that scrambles your files and demands money to unlock them. If I catch one I seal it off before it spreads -- and nothing is ever deleted, so we can always undo it.",
+    "quarantine": "Quarantine means I move the file into a sealed box where it can't run or touch anything. It is NOT deleted -- you can restore it anytime, so it's always safe to say yes."
+  },
+  "cards": {
+    "ransomware": {
+      "threat_class": "ransomware",
+      "mitre": ["T1486"],
+      "severity": "high",
+      "recommendation": "quarantine",
+      "opener": [
+        "{greeting}, {firstName}. Give me one second -- something just moved on your machine and I want you to see it.",
+        "{firstName}? It's Vesper. I caught something a moment ago. I don't knock unless it's real -- and this one's real.",
+        "Sorry to break in, {firstName}. I keep watch here at {orgName}, and something just tripped a wire.",
+        "{firstName}, stay with me a second. I just stopped what I was doing -- this one needs your eyes.",
+        "{greeting}. It's Vesper. I'd rather interrupt you than let this one slide, {firstName}."
+      ],
+      "finding": [
+        "A program calling itself \"{process}\" started locking up files in {location} about {ago} ago -- {fileCount} so far -- and left a note demanding payment to get them back.",
+        "Something named \"{process}\" began sealing your files shut in {location} {ago} ago. It's hit {fileCount} already and dropped a ransom note.",
+        "{ago} ago, \"{process}\" started scrambling everything in {location} -- {fileCount} touched -- and it wants money to hand them back."
+      ],
+      "explanation": [
+        "That's ransomware: it scrambles your files and holds them hostage for money. The good news is I caught it early, and nothing is lost yet.",
+        "This is ransomware -- it locks your own files and charges you to unlock them. I got to it early, though, so you haven't lost anything.",
+        "Plain version: it's a kidnapper for your files, demanding a ransom. But I caught it mid-step, so nothing's gone."
+      ],
+      "recommendation_line": [
+        "Here's what I'd do: let me wall it off right now so it can't reach anything else. Nothing gets deleted -- I just seal it in a box you can always reopen.",
+        "My advice: let me box it up this second so it stops spreading. I never delete -- it goes in a sealed container you can undo later.",
+        "If it were me, I'd seal it off immediately. Nothing's destroyed -- it just goes in quarantine, and you can restore it anytime."
+      ],
+      "question": [
+        "Want me to quarantine it, {firstName}?   [Quarantine] seals it off  ·  [Leave it]  ·  or just ask me anything.",
+        "Say the word, {firstName}.   [Quarantine] to seal it  ·  [Leave it] to wait  ·  or ask me anything first."
+      ]
+    }
+  }
+}

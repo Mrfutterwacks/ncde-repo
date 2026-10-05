@@ -1,0 +1,10 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Path
+Target = usr/share/applications/*.desktop
+
+[Action]
+Description = NCDE: keeping infrastructure launchers hidden (dock-only policy)...
+When = PostTransaction
+Exec = /usr/local/lib/ncde/ncde-launcher-hide.sh

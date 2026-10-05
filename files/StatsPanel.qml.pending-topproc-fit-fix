@@ -1,0 +1,323 @@
+import QtQuick
+import "mucha-panels.js" as P
+
+Item {
+    id: root
+    property Item backgroundSource: null
+    // Available-height clamp set by the desktop widget column (DesktopWidget.qml).
+    // < 0 = unbounded, so any standalone use is unchanged.
+    property real maxHeight: -1
+    width: parent ? parent.width : 316
+    height: maxHeight >= 0 ? Math.min(statsContent.height + 12, maxHeight)
+                           : statsContent.height + 12
+    clip: maxHeight >= 0 && statsContent.height + 12 > maxHeight
+
+    property var _surfaceGlass: null
+    Component.onCompleted: {
+        _surfaceGlass = typeof ncde.surfaceGlass === "function" ? ncde.surfaceGlass("stats") : null
+    }
+    Connections {
+        target: ncde
+        function onThemeChanged() {
+            root._surfaceGlass = typeof ncde.surfaceGlass === "function" ? ncde.surfaceGlass("stats") : null
+        }
+    }
+
+    NCDEGlassSurface {
+        anchors {
+            fill: parent
+            leftMargin: 4; rightMargin: 4
+            topMargin: 2; bottomMargin: 2
+        }
+        backgroundSource: root.backgroundSource
+        cornerRadius: 14
+        tint: {
+            if (!ncde.presetActive) {
+                var g = root._surfaceGlass
+                if (g && g["tint"] !== undefined) { var c = Qt.color(g["tint"]); return Qt.rgba(c.r, c.g, c.b, g["shine"] !== undefined ? g["shine"] * 0.36 : 0.18) }
+            }
+            return Qt.rgba(ncde.accent.r, ncde.accent.g, ncde.accent.b, 0.18)
+        }
+        glowA: root._surfaceGlass && root._surfaceGlass["glow"] !== undefined ? root._surfaceGlass["glow"] : 0.70
+        edge: {
+            if (!ncde.presetActive) {
+                var g = root._surfaceGlass
+                if (g && g["border"] !== undefined) { var c = Qt.color(g["border"]); return Qt.rgba(c.r, c.g, c.b, 0.85) }
+            }
+            return Qt.rgba(ncde.glow.r, ncde.glow.g, ncde.glow.b, 0.85)
+        }
+        glowRim: {
+            if (!ncde.presetActive) {
+                var g = root._surfaceGlass
+                if (g && g["glowColor"] !== undefined) return Qt.color(g["glowColor"])
+            }
+            return ncde.glow
+        }
+        glowHalo: {
+            if (!ncde.presetActive) {
+                var g = root._surfaceGlass
+                if (g && g["glowColor"] !== undefined) return Qt.color(g["glowColor"])
+            }
+            return ncde.glow
+        }
+    }
+
+    // MuchaStats content inlined under NCDEGlassSurface (glass merger 2026-06-13)
+    Item {
+        id: statsContent
+        width: parent.width - 20
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.top: parent.top
+        anchors.topMargin: 10
+        height: statsCanvas.height
+                + (topProcCol.visible ? topProcCol.height + 6 : 0)
+                + (diskCol.count > 0 ? diskCol.height + 8 : 0)
+
+        // G3 fix (2026-07-12): the WM binary's WidgetData never iterates /proc/<pid>,
+        // so widget_data.top{1,2,3}name/cpu are always empty. StatsLive reads the
+        // helper JSON (top processes) and we render them below. No binary touched.
+        StatsLive { id: statsLive }
+
+        property var _widgetStyle: null
+        Component.onCompleted: {
+            _widgetStyle = typeof ncde.widgetStyle === "function" ? ncde.widgetStyle("stats") : null
+            statsCanvas.requestPaint()
+        }
+        Connections {
+            target: ncde
+            function onThemeChanged() {
+                statsContent._widgetStyle = typeof ncde.widgetStyle === "function" ? ncde.widgetStyle("stats") : null
+                statsCanvas.requestPaint()
+            }
+        }
+
+        // Bubble animation clock for the tube gauges (vsync-aligned, idle/thermal-gated)
+        property real elapsedT: 0
+        FrameAnimation {
+            running: statsContent.visible && !animPolicy.screenIdle
+            property int _skip: 0
+            property int _capSkip: 0
+            onTriggered: {
+                statsContent.elapsedT += frameTime
+                if (animPolicy.thermalPressure) { if (_skip++ % 2 !== 0) return } else _skip = 0
+                if ((_capSkip++ & 1) === 0) statsCanvas.requestPaint()  // ~30fps cap while active
+            }
+        }
+
+        Connections {
+            target: widget_data
+            function onStatsChanged() { if (statsContent.visible) statsCanvas.requestPaint() }
+        }
+
+        Canvas {
+            id: statsCanvas
+            width: parent.width; height: 152
+            anchors.top: parent.top
+            // Threaded = full double-buffered repaint off the GUI thread. Cooperative paints
+            // synchronously on the main thread — with this Canvas repainting up to ~15fps whenever
+            // visible (see the FrameAnimation above), that main-thread work was competing with input
+            // processing (keyboard/paste/cursor), causing intermittent freezes. Same fix already
+            // proven correct for SpacePanel.qml's orrery, which has the identical FrameAnimation-driven
+            // repaint pattern and reads the same kind of external QML properties (ncde.*/widget style)
+            // from onPaint.
+            renderStrategy: Canvas.Threaded
+            renderTarget: Canvas.Image
+            onPaint: {
+                var ctx = getContext("2d")
+                ctx.clearRect(0, 0, width, height)
+                var ws      = statsContent._widgetStyle
+                var accent  = (ws && ws["accent"]  !== "" && ws["accent"]  !== undefined) ? Qt.color(ws["accent"])  : ncde.accent
+                var glow    = (ws && ws["glow"]    !== "" && ws["glow"]    !== undefined) ? Qt.color(ws["glow"])    : ncde.glow
+                var leading = (ws && ws["leading"] !== "" && ws["leading"] !== undefined) ? ws["leading"] : ncde.gilt4.toString()
+                var font    = (ws && ws["font"]    && ws["font"]    !== "") ? ws["font"]    : theme.fontFamily
+                var fill    = (ws && ws["fill"]    !== "" && ws["fill"]    !== undefined) ? ws["fill"]    : ""
+
+                // ── Three mad-scientist test-tube gauges: CPU / RAM / DISK ──
+                var cols = [
+                    { pct: widget_data.cpuTotal    || 0, label: "CPU",
+                      val: Math.round(widget_data.cpuTotal || 0) + "%" },
+                    { pct: widget_data.ramPercent  || 0, label: "RAM",
+                      val: Math.round(widget_data.ramPercent || 0) + "%" },
+                    { pct: widget_data.diskPercent || 0, label: "DISK",
+                      val: Math.round(widget_data.diskPercent || 0) + "%" }
+                ]
+                var gap = 18
+                var marginX = 14
+                var slotW = (width - marginX*2 - gap*(cols.length-1)) / cols.length
+                var tubeW = Math.min(slotW, 46)        // slim test-tubes
+                var colY = 8
+                var colH = 64
+                for (var i = 0; i < cols.length; i++) {
+                    var slotX = marginX + i * (slotW + gap)
+                    var tubeX = slotX + (slotW - tubeW) / 2
+                    P.paintTubeGauge(ctx, tubeX, colY, tubeW, colH,
+                                     cols[i].pct, cols[i].label, cols[i].val,
+                                     statsContent.elapsedT, font, accent, glow, leading, fill)
+                }
+
+                // ── VFD amber readout band (pushed below the gauge labels) ──
+                var vy = colY + colH + 34
+                P.paintVFDStrip(ctx, 12, vy, width - 24, 46, [
+                    { label: "UPTIME", value: (widget_data.uptime   || "—") },
+                    { label: "CPU",    value: (Math.round((widget_data.cpuFreqGHz||0)*100)/100) + " GHz · "
+                                              + Math.round(widget_data.cpuTempF || 0) + "°F" },
+                    { label: "NET",    value: "↓" + (widget_data.netDown || "0")
+                                              + "  ↑" + (widget_data.netUp || "0") }
+                ], (ncde.monoFont || "monospace"), leading)
+            }
+        }
+
+        // ── Top processes (G3): fed by StatsLive from the helper JSON ──
+        // 2026-07-15 (operator report, repeat regression): row 3 was being sliced
+        // in half by the widget's own edge whenever Stats' maxHeight budget
+        // (DesktopWidget.qml — sized so Salon Nocturne never gets pushed past the
+        // bottom panel) was tighter than these 3 rows' natural size. A prior fix
+        // treated that clip as an acceptable "tail clips in-glass" trade-off
+        // instead of making the rows actually fit. Real fix: give the row block an
+        // explicit height equal to whatever budget is actually available (never
+        // more), and size each row/its font to fit that budget exactly (floor
+        // 9px) — so all 3 rows stay fully visible and shrink together as the
+        // widget's available space shrinks, instead of clipping mid-glyph.
+        // Unbounded use (maxHeight < 0, standalone/preview) keeps the old natural
+        // sizing untouched.
+        Column {
+            id: topProcCol
+            visible: statsLive.top1name !== "" || statsLive.top2name !== "" || statsLive.top3name !== ""
+            anchors.top: statsCanvas.bottom; anchors.topMargin: 6
+            anchors.left: parent.left; anchors.leftMargin: 14
+            anchors.right: parent.right; anchors.rightMargin: 14
+            spacing: 3
+            clip: true
+
+            property real availH: root.maxHeight >= 0
+                ? Math.max(0, root.maxHeight - 18 - statsCanvas.height
+                               - (diskCol.count > 0 ? diskCol.height + 8 : 0))
+                : -1
+            property real labelH: procLabel.implicitHeight
+            property real rowH: availH >= 0 ? Math.max(0, (availH - labelH - 3 * spacing) / 3) : -1
+            property real rowFontPx: rowH > 0 ? Math.max(9, Math.min(ncde.fontSize_sm, rowH * 0.7)) : ncde.fontSize_sm
+
+            Text {
+                id: procLabel
+                text: "TOP PROCESSES"
+                color: Qt.rgba(ncde.gilt4.r, ncde.gilt4.g, ncde.gilt4.b, 0.85)
+                font.pixelSize: ncde.fontSize_sm; font.family: theme.fontFamily
+                font.bold: true; font.letterSpacing: 1.5
+            }
+            Repeater {
+                model: 3
+                Item {
+                    width: topProcCol.width
+                    clip: true
+                    // Explicit budget-fit height when constrained (topProcCol.rowH);
+                    // falls back to the old actual-text-height sizing when
+                    // unbounded. clip:true (this + the Column above) stays as a
+                    // hard backstop against any letter-spacing/elide edge case.
+                    height: topProcCol.rowH > 0 ? topProcCol.rowH
+                                                 : Math.max(procRank.implicitHeight, procName.implicitHeight, procCpu.implicitHeight)
+                    property string pn: index === 0 ? statsLive.top1name : index === 1 ? statsLive.top2name : statsLive.top3name
+                    property real   pc: index === 0 ? statsLive.top1cpu  : index === 1 ? statsLive.top2cpu  : statsLive.top3cpu
+                    visible: pn !== ""
+
+                    Text {
+                        id: procRank
+                        anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+                        text: (index + 1) + "."
+                        width: 14
+                        color: Qt.rgba(ncde.glow.r, ncde.glow.g, ncde.glow.b, 0.6)
+                        font.pixelSize: topProcCol.rowFontPx; font.family: (ncde.monoFont || "monospace")
+                    }
+                    Text {
+                        id: procName
+                        anchors.left: procRank.right; anchors.leftMargin: 4
+                        anchors.right: procCpu.left; anchors.rightMargin: 6
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: parent.pn; elide: Text.ElideRight
+                        color: Qt.rgba(ncde.glow.r, ncde.glow.g, ncde.glow.b, 0.9)
+                        font.pixelSize: topProcCol.rowFontPx; font.family: theme.fontFamily; font.bold: true
+                    }
+                    Text {
+                        id: procCpu
+                        anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                        text: (Math.round(parent.pc * 10) / 10) + "%"
+                        color: Qt.rgba(ncde.glow.r, ncde.glow.g, ncde.glow.b, 0.65)
+                        font.pixelSize: topProcCol.rowFontPx; font.family: (ncde.monoFont || "monospace")
+                    }
+                }
+            }
+        }
+
+        // ── Disk volume rows ──────────────────────────────────────────
+        Column {
+            id: diskCol
+            property int count: widget_data.mountedVolumes ? widget_data.mountedVolumes.length : 0
+                // Stats fix 2026-07-09: the engine ships usedBytes/totalBytes per
+                // volume -- the used/total/percent fields this file read never
+                // existed in the binary. Compute display values here.
+                function pct(v)  { return (v && v.totalBytes > 0) ? (v.usedBytes / v.totalBytes) * 100 : 0 }
+                function fmtB(b) {
+                    if (b === undefined || b === null || b <= 0) return "\u2014"
+                    var gb = b / 1073741824
+                    if (gb >= 1000) return (Math.round(gb / 102.4) / 10) + " TB"
+                    if (gb >= 100)  return Math.round(gb) + " GB"
+                    if (gb >= 1)    return (Math.round(gb * 10) / 10) + " GB"
+                    return Math.round(b / 1048576) + " MB"
+                }
+            anchors.top: topProcCol.visible ? topProcCol.bottom : statsCanvas.bottom; anchors.topMargin: 8
+            anchors.left: parent.left; anchors.leftMargin: 14
+            anchors.right: parent.right; anchors.rightMargin: 14
+            spacing: 5
+            visible: count > 0
+
+            Repeater {
+                model: widget_data.mountedVolumes
+                Item {
+                    width: diskCol.width
+                    // Same fix as the process rows above: track the real text
+                    // height (font-scaled) instead of a fixed 20px box.
+                    height: Math.max(volLabel.implicitHeight, volInfo.implicitHeight)
+
+                    Text {
+                        id: volLabel
+                        anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+                        text: modelData.label; width: 36; elide: Text.ElideRight
+                        color: Qt.rgba(ncde.glow.r, ncde.glow.g, ncde.glow.b, 0.9)
+                        font.pixelSize: ncde.fontSize_sm; font.family: theme.fontFamily; font.bold: true
+                    }
+
+                    // Track
+                    Rectangle {
+                        id: barTrack
+                        anchors.left: volLabel.right; anchors.leftMargin: 6
+                        anchors.right: volInfo.left; anchors.rightMargin: 6
+                        anchors.verticalCenter: parent.verticalCenter
+                        height: 5; radius: 2
+                        color: {
+                            var a = (statsContent._widgetStyle && statsContent._widgetStyle["accent"] !== undefined) ? Qt.color(statsContent._widgetStyle["accent"]) : ncde.accent
+                            return Qt.rgba(a.r, a.g, a.b, 0.15)
+                        }
+
+                        // Fill
+                        Rectangle {
+                            width: Math.max(barTrack.radius * 2, barTrack.width * Math.min(diskCol.pct(modelData) / 100, 1.0))
+                            height: parent.height; radius: parent.radius
+                            color: {
+                                if (diskCol.pct(modelData) > 85) return Qt.rgba(0.85, 0.25, 0.2, 0.85)
+                                var a = (statsContent._widgetStyle && statsContent._widgetStyle["accent"] !== undefined) ? Qt.color(statsContent._widgetStyle["accent"]) : ncde.accent
+                                return Qt.rgba(a.r, a.g, a.b, 0.82)
+                            }
+                        }
+                    }
+
+                    Text {
+                        id: volInfo
+                        anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                        text: diskCol.fmtB(modelData.usedBytes) + " / " + diskCol.fmtB(modelData.totalBytes)
+                        color: Qt.rgba(ncde.glow.r, ncde.glow.g, ncde.glow.b, 0.65)
+                        font.pixelSize: ncde.fontSize_sm; font.family: theme.fontFamily
+                    }
+                }
+            }
+        }
+    }
+}

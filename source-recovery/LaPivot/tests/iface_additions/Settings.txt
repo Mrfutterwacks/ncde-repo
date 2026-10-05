@@ -1,0 +1,4 @@
+# Settings > Display: keep-or-revert after a mode/rate/rotation/scale change (D2). 2026-09-30.
+    Q_INVOKABLE public void confirmDisplayChange();
+    Q_INVOKABLE public void revertDisplayChange();
+    signal:     public void displayChangePending(int seconds);

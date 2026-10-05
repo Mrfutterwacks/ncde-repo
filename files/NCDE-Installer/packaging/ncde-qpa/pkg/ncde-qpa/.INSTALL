@@ -1,0 +1,4 @@
+post_remove() {
+  rm -f /usr/lib/qt6/plugins/platformthemes/libncde-qpa.so{,.disabled}
+  rm -rf /var/lib/ncde-qpa
+}

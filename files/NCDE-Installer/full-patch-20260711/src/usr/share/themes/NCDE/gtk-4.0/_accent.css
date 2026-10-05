@@ -1,0 +1,8 @@
+/* NCDEEngine — wallpaper accent. Do not edit. */
+/* Byte-identical format to the GTK3 _accent.css — the engine writes both copies
+   in the same pass. Adds libadwaita accent compat names. */
+@define-color ncde_accent #6774bd;
+@define-color theme_selected_bg_color @ncde_accent;
+@define-color accent_bg_color @ncde_accent;
+@define-color accent_color @ncde_accent;
+@define-color accent_fg_color #FFFFFF;

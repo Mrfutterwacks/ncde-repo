@@ -1,0 +1,9 @@
+post_install() {
+  echo "NCDE is now updated through NCDE Command's System Update (and pacman -Syu)."
+  echo "The patch applies in the background; log out and back in when told."
+  /usr/lib/ncde-update/ncde-libguard pre    # seed the library stash right away
+  /usr/lib/ncde-update/ncde-libguard post
+}
+post_upgrade() {
+  /usr/lib/ncde-update/ncde-libguard pre
+}

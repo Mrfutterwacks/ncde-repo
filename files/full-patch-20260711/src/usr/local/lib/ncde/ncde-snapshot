@@ -1,0 +1,92 @@
+#!/bin/bash
+# ncde-snapshot — NCDE System Restore ("Soundings") boot snapshotter.
+#
+# Runs once per boot (ncde-snapshot.service). It:
+#   1. deletes any leftover @_old_* (the broken root set aside by a prior restore;
+#      safe to delete now because we are running the restored @),
+#   2. takes a read-only btrfs snapshot of the running system (@) into /restore,
+#   3. writes a .meta sidecar the recovery UI reads, and
+#   4. prunes to the newest KEEP, with a space-pressure safety valve.
+#
+# btrfs only. No rsync, no simulation. The rolling window means /restore holds the
+# last KEEP boot states and self-rotates; COW keeps it cheap (only changed blocks).
+set -euo pipefail
+
+KEEP=7              # rolling window of boot snapshots
+FLOOR=3             # never prune below this, even under space pressure
+USE_PCT_LIMIT=85    # if the fs is >= this %% full, prune harder toward FLOOR
+
+log(){ printf '[ncde-snapshot] %s\n' "$*"; }
+die(){ printf '[ncde-snapshot] ERROR: %s\n' "$*" >&2; exit 1; }
+
+[[ $EUID -eq 0 ]] || die "must run as root"
+command -v btrfs >/dev/null   || die "btrfs-progs not found"
+command -v findmnt >/dev/null || die "findmnt not found"
+
+# Resolve the btrfs device backing / and mount the top-level (subvolid=5) so @,
+# @home and @restore are visible as directory entries.
+[[ "$(findmnt -no FSTYPE /)" == btrfs ]] || die "root filesystem is not btrfs"
+root_src=$(findmnt -no SOURCE /) || die "cannot determine root source"
+dev=${root_src%%[*}                       # strip a trailing [/@] subvol suffix
+
+TOP=$(mktemp -d /run/ncde-snapshot.XXXXXX)
+cleanup(){ mountpoint -q "$TOP" && umount "$TOP" 2>/dev/null || true; rmdir "$TOP" 2>/dev/null || true; }
+trap cleanup EXIT
+mount -o subvolid=5 "$dev" "$TOP" || die "cannot mount btrfs top-level"
+
+[[ -d "$TOP/@" ]]        || die "no @ subvolume at top level"
+[[ -d "$TOP/@restore" ]] || die "no @restore subvolume — installer layout missing"
+
+# 1) Post-restore cleanup of the old (broken) root.
+shopt -s nullglob
+for old in "$TOP"/@_old_*; do
+    log "removing post-restore leftover $(basename "$old")"
+    btrfs subvolume delete "$old" || log "warn: could not delete $(basename "$old")"
+done
+
+# 2) Boot snapshot (read-only) of the running system, with a monotonic padded id.
+seqfile="$TOP/@restore/.seq"
+seq=$(cat "$seqfile" 2>/dev/null || echo 0); seq=$((seq + 1))
+id=$(printf 'BAK-%04d' "$seq")
+btrfs subvolume snapshot -r "$TOP/@" "$TOP/@restore/$id" || die "snapshot failed"
+printf '%s\n' "$seq" > "$seqfile"
+
+# 3) Metadata sidecar (read by the UI via RestoreBackend.listBackups()).
+now=$(date '+%Y-%m-%d %H:%M')
+kernel=$(uname -r)
+size=$(df -h --output=used / | tail -1 | tr -d ' ')
+hour=$(date +%H)
+if   (( 10#$hour < 5  )); then tod=night
+elif (( 10#$hour < 12 )); then tod=morning
+elif (( 10#$hour < 17 )); then tod=afternoon
+elif (( 10#$hour < 21 )); then tod=evening
+else                           tod=night; fi
+word="$(date '+%a') $tod"
+cat > "$TOP/@restore/$id.meta" <<META
+{ "id":"$id", "date":"$now", "word":"$word", "kernel":"$kernel", "size":"$size", "tag":"boot" }
+META
+log "created $id ($now, $size, kernel $kernel)"
+
+# 4) Prune to the newest <keep> (BAK-#### sorts oldest-first while zero-padded).
+prune_to(){
+    local keep=$1 list n i name
+    mapfile -t list < <(ls -1d "$TOP"/@restore/BAK-* 2>/dev/null | sort)
+    n=${#list[@]}
+    for (( i = 0; i < n - keep; i++ )); do
+        name=$(basename "${list[i]}")
+        log "pruning $name"
+        if btrfs subvolume delete "${list[i]}"; then rm -f "$TOP/@restore/$name.meta"
+        else log "warn: prune failed for $name"; fi
+    done
+}
+prune_to "$KEEP"
+
+# 5) Space-pressure safety valve.
+usep=$(df --output=pcent / | tail -1 | tr -dc '0-9')
+if (( usep >= USE_PCT_LIMIT )); then
+    log "space pressure (${usep}%% >= ${USE_PCT_LIMIT}%%) — pruning toward floor $FLOOR"
+    prune_to "$FLOOR"
+fi
+
+sync
+log "done"

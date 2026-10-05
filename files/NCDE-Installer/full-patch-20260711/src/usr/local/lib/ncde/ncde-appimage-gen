@@ -1,0 +1,43 @@
+#!/bin/bash
+# NCDE AppImage launcher sync (2026-09-24).
+# pacman and flatpak apps already ship .desktop files; AppImages and portable
+# apps don't, so they never reached the dock/Expose. Drop one into ~/Applications
+# and this writes ~/.local/share/applications/ncde-appimage-<name>.desktop;
+# delete it and the entry goes too. Run by ncde-appimage-gen.path on change.
+set -u
+SRC="$HOME/Applications"
+DST="$HOME/.local/share/applications"
+mkdir -p "$SRC" "$DST"
+shopt -s nullglob nocaseglob
+
+for img in "$SRC"/*.AppImage; do
+    chmod +x "$img" 2>/dev/null
+    base=$(basename "$img"); base=${base%.*}
+    # "Obsidian-1.6.7-x86_64" -> "Obsidian"; "krita-5.2.3" -> "Krita"
+    name=$(sed -E 's/[-_ ]v?[0-9][0-9.]*.*$//; s/[-_](x86_64|amd64|aarch64|linux).*$//I' <<<"$base")
+    [ -n "$name" ] || name=$base
+    key=$(tr 'A-Z _' 'a-z--' <<<"$name")
+    pretty=$(sed -E 's/[-_]+/ /g; s/\b(.)/\u\1/g' <<<"$name")
+    out="$DST/ncde-appimage-$key.desktop"
+    [ -f "$out" ] && grep -qxF "X-NCDE-Source=$img" "$out" && continue
+    cat > "$out" <<DESK
+[Desktop Entry]
+Type=Application
+Name=$pretty
+Exec="$img" %U
+TryExec=$img
+Icon=$key
+Categories=Utility;
+Terminal=false
+X-NCDE-Generated=appimage
+X-NCDE-Source=$img
+DESK
+done
+
+# sweep entries whose AppImage was deleted or moved
+for d in "$DST"/ncde-appimage-*.desktop; do
+    src=$(sed -n 's/^X-NCDE-Source=//p' "$d")
+    [ -n "$src" ] && [ ! -e "$src" ] && rm -f "$d"
+done
+command -v update-desktop-database >/dev/null && update-desktop-database -q "$DST" 2>/dev/null
+exit 0

@@ -1,0 +1,7 @@
+{
+    "dnd": false,
+    "notifPosition": 1,
+    "quietFrom": "10:00 PM",
+    "quietHoursOn": true,
+    "quietTo": "7:00 AM"
+}

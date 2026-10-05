@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "version": "1.0",
+  "name": "NCDE — Belle Époque Night",
+  "description": "NCDE dark browser livery: warm near-black grounds, gilt and ivory. Part of NCDEKit.",
+  "theme": {
+    "colors": {
+      "frame":                 [12, 9, 7],
+      "frame_inactive":        [10, 8, 6],
+      "frame_incognito":       [10, 6, 12],
+      "toolbar":               [23, 16, 9],
+      "toolbar_button_icon":   [233, 201, 124],
+      "tab_background_text":   [184, 160, 122],
+      "tab_text":              [244, 233, 210],
+      "background_tab":        [16, 11, 7],
+      "bookmark_text":         [233, 201, 124],
+      "ntp_background":        [12, 9, 7],
+      "ntp_text":              [244, 233, 210],
+      "ntp_link":              [95, 180, 198],
+      "ntp_header":            [201, 138, 58],
+      "button_background":     [30, 20, 9],
+      "omnibox_background":    [10, 8, 6],
+      "omnibox_text":          [244, 233, 210]
+    },
+    "tints": {
+      "buttons": [0.09, 0.55, 0.62]
+    },
+    "properties": {
+      "ntp_logo_alternate": 1
+    }
+  }
+}

@@ -1,0 +1,3 @@
+# NotificationManager additions beyond the oracle.
+# Settings-backed DND and quiet hours.
+    Q_INVOKABLE public void setSettings(Settings* settings);

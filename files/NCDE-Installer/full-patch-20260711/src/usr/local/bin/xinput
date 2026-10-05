@@ -1,0 +1,21 @@
+#!/bin/bash
+# /usr/local/bin/xinput — pass-through to /usr/bin/xinput (2026-09-25).
+# LaPivot applies pointer settings (libinput Accel Speed, Natural Scrolling,
+# Tapping, Disable While Typing) with `xinput set-prop` on EVERY input device,
+# keyboards and power buttons included. Those have no such property, so each
+# login and each settings change wrote "property 'libinput Accel Speed' doesn't
+# exist" to ~/ncde-debug.log (11 per apply). LaPivot has no source, so this sits
+# ahead of /usr/bin on PATH: a set-prop naming a property the device does not
+# have is skipped quietly -- exactly what xinput did already, minus the error.
+# Everything else, and every set-prop on a device that has the property, is
+# handed to the real xinput untouched.
+REAL=/usr/bin/xinput
+if [ "${1:-}" = "set-prop" ]; then
+    i=2
+    while [ $i -le $# ] && [ "${!i#--}" != "${!i}" ]; do i=$((i + 1)); done   # skip --type= / --format=
+    dev="${!i:-}"; j=$((i + 1)); prop="${!j:-}"
+    if [ -n "$dev" ] && [ -n "$prop" ] && ! [[ "$prop" =~ ^[0-9]+$ ]]; then
+        "$REAL" list-props "$dev" 2>/dev/null | grep -qF "	$prop (" || exit 0
+    fi
+fi
+exec "$REAL" "$@"

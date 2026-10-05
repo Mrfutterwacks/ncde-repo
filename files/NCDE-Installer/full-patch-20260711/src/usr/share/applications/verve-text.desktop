@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Verve
+GenericName=Text Editor
+Comment=Edit text files
+Exec=/usr/local/bin/verve-text %F
+Icon=accessories-text-editor
+Terminal=false
+Categories=Utility;TextEditor;
+MimeType=text/plain;
+Keywords=text;editor;notes;
+StartupNotify=true

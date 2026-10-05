@@ -1,0 +1,12 @@
+{
+    "accent": "cyan",
+    "customAccent": "#2335a0",
+    "customBase": "#211d22",
+    "darkModeLock": "auto",
+    "mode": "dark",
+    "sampledBorder": "#23242e",
+    "sampledPanelText": "#ebd6d2",
+    "sampledPopupBg": "#1c191d",
+    "sampledSurface": "#202228",
+    "usingCustomBase": true
+}

@@ -1,0 +1,28 @@
+/* NCDE GTK3 — light grounds. Shipped default (canonical bridge palette, gtk.md §1).
+   Engine-rewritten LIVE from tokens on every Iris Chroma click. Same structure as
+   _palette-dark.css, light column values. NO Adwaita import. */
+
+@define-color theme_bg_color            #E7E1D8;  /* ← panelBg  */
+@define-color theme_fg_color            #2B2621;  /* ← ink      */
+@define-color theme_base_color          #F4F1EC;  /* ← surface  */
+@define-color theme_text_color          #2B2621;  /* ← ink      */
+@define-color content_view_bg           #F4F1EC;  /* ← surface  */
+@define-color text_view_bg              #F4F1EC;  /* ← surface  */
+@define-color insensitive_bg_color      #E7E1D8;  /* ← panelBg  */
+@define-color insensitive_fg_color      #9A9088;  /* ← inkSoft  */
+@define-color insensitive_base_color    #F4F1EC;  /* ← surface  */
+@define-color theme_unfocused_bg_color   #E7E1D8; /* ← panelBg  */
+@define-color theme_unfocused_fg_color   #9A9088; /* ← inkSoft  */
+@define-color theme_unfocused_base_color #F4F1EC; /* ← surface  */
+@define-color theme_unfocused_text_color #2B2621; /* ← ink      */
+@define-color borders                    #C2B6A4; /* ← border   */
+@define-color unfocused_borders          #C2B6A4; /* ← border   */
+@define-color theme_selected_fg_color            #FFFFFF;
+@define-color theme_unfocused_selected_fg_color  #FFFFFF;
+/* theme_selected_bg_color + ncde_accent come from _accent.css (engine, live). */
+
+@define-color tooltip_bg_color  #2B2621;
+@define-color tooltip_fg_color  #F4F1EC;
+@define-color warning_color     #b57e18;
+@define-color error_color       #a83226;
+@define-color success_color     #3a7a52;

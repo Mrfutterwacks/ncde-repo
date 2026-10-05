@@ -1,0 +1,16 @@
+# LeapFrogPond additions — measured defects fixed 2026-10-01.
+# P1: saveNotes() was NOT atomic — same truncation risk as CalendarBackend::save() (C2).
+#     Fixed: write .tmp, fsync, rename().
+# P2: loadNotes() called saveNotes() when file missing (like C3).
+#     Fixed: silent empty init.
+# P3: exportCsv() wrote CSV WITHOUT QUOTING — fields containing commas, quotes, or newlines
+#     broke the CSV. Fixed: RFC 4180 quoting (double quotes escaped as "", field wrapped in "").
+# P5: genId() returned 8-char UUID — collision-prone.
+#     Fixed: full 36-char UUID (QUuid::WithoutBraces).
+# P6: archivePast() deleted appointments but did NOT emit archived(count) for Ledger refresh.
+#     Fixed: emits archived(count).
+# P9: Constructor connected to CalendarBackend::changed but never disconnected on destroy.
+#     Fixed: destroyed() watcher clears pointer.
+
+    Q_INVOKABLE public void reload();
+    Q_INVOKABLE public QString configFilePath();

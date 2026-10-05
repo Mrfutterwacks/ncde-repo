@@ -1,0 +1,5 @@
+[Unit]
+Description=Apply NCDE Settings-panel proxy configuration
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/ncde-proxy-apply

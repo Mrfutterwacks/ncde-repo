@@ -1,0 +1,10 @@
+{
+    "cursorSize": 48,
+    "disableWhileTyping": true,
+    "kbRepeatDelay": 300,
+    "kbRepeatRate": 30,
+    "naturalScroll": true,
+    "pointerSpeed": 50,
+    "tapToClick": true,
+    "touchpadSpeed": 50
+}

@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "version": "1.0",
+  "name": "NCDE — Concordia Day",
+  "description": "NCDE light browser livery: aged-vellum grounds, sepia ink, gilt. Part of NCDEKit.",
+  "theme": {
+    "colors": {
+      "frame":                 [231, 212, 166],
+      "frame_inactive":        [224, 205, 160],
+      "frame_incognito":       [42, 6, 18],
+      "toolbar":               [246, 239, 220],
+      "toolbar_button_icon":   [90, 58, 20],
+      "tab_background_text":   [107, 81, 58],
+      "tab_text":              [58, 36, 24],
+      "background_tab":        [224, 205, 160],
+      "bookmark_text":         [90, 58, 20],
+      "ntp_background":        [231, 212, 166],
+      "ntp_text":              [58, 36, 24],
+      "ntp_link":              [58, 111, 136],
+      "ntp_header":            [138, 90, 32],
+      "button_background":     [224, 205, 160],
+      "omnibox_background":    [251, 246, 233],
+      "omnibox_text":          [58, 36, 24]
+    },
+    "tints": {
+      "buttons": [0.09, 0.45, 0.32]
+    },
+    "properties": {
+      "ntp_logo_alternate": 0
+    }
+  }
+}

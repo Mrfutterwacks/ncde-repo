@@ -1,0 +1,727 @@
+#!/usr/bin/env python3
+# ncde-session — NCDE session save/restore helper ("what was I doing").
+#
+# STANDALONE helper in the spirit of Sentinel / Vesper / App-Nap. It performs
+# the session save/restore that the stripped LaPivot launcher never gained,
+# WITHOUT touching the window manager, panels, the session script, ncde-portal,
+# logind, or any other live file. It only READS X11 + /proc and WRITES its own
+# JSON under ~/.config/ncde/.
+#
+# Two modes, driven by a systemd USER unit (ncde-session.service):
+#   save     (ExecStop,  fired on logout when the user session stops)
+#              -> enumerate genuine user-app windows, map each to its PID, read
+#                 /proc/PID/cmdline (the real launch command), de-duplicate, and
+#                 write {cmdline, wm_class, geometry} to session.json.
+#   restore  (ExecStart, fired on login)
+#              -> read session.json, relaunch each saved cmdline, then rotate
+#                 the snapshot aside so a re-trigger never double-launches.
+#
+# SAFETY IS PARAMOUNT (non-technical operator; a wrong relaunch is worse than
+# none). Hard rules enforced below:
+#   * A HARD-DENY list ALWAYS wins: LaPivot (the WM), ncde-frame / ncde-container
+#     (panels), ncde-x11-session (the session script), every /usr/local/bin/ncde-*
+#     daemon, picom, dbus, systemd, xss-lock, and THIS helper itself are never
+#     captured and never relaunched. The deny is re-applied at BOTH save time and
+#     restore time (defence in depth: a hand-edited or stale JSON still cannot
+#     resurrect the WM).
+#   * Only real user apps are captured: a normal, non-override-redirect,
+#     InputOutput top-level window that owns a live PID whose /proc/PID/exe is a
+#     real executable. A curated ALLOWLIST of NCDE house/dock apps is a fast
+#     accept path; anything else that is a genuine GUI app is also accepted --
+#     but HARD-DENY still overrides everything.
+#   * Conservative by construction: any error, missing X server, or unparseable
+#     entry results in doing LESS (or nothing) and exiting 0. The helper NEVER
+#     crashes the session and NEVER clobbers a good snapshot when it cannot see
+#     the display.
+#   * ZERO window-manager modification. It only opens the X display read-only
+#     (XQueryTree / properties) and launches detached user processes on restore.
+#
+# X11 is reached through libX11 via ctypes (same technique as ncde-appnap), so
+# there is no python-xlib dependency.
+
+import ctypes
+import ctypes.util
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+
+HOME = os.path.expanduser("~")
+CONFIG_DIR = os.path.join(HOME, ".config", "ncde")
+SNAPSHOT = os.path.join(CONFIG_DIR, "session.json")
+
+SCHEMA_VERSION = 1
+MAX_APPS = 40            # hard cap: never relaunch more than this (anti fork-bomb)
+KEEP_ROTATED = 5         # how many rotated snapshots to retain
+
+
+def log(msg):
+    sys.stderr.write("ncde-session: %s\n" % msg)
+    sys.stderr.flush()
+
+
+# ===========================================================================
+# SAFETY FILTER  (the heart of the helper — HARD-DENY always wins)
+# ===========================================================================
+
+# Interpreters/wrappers: when argv[0] is one of these, the *real* program is a
+# later argument. We test that too, so `python3 /usr/bin/lapivot` is still denied
+# and `env FOO=1 spotify` is still allowed.
+INTERPRETERS = {
+    "python", "python2", "python3", "sh", "bash", "zsh", "dash",
+    "env", "perl", "ruby", "node", "nodejs", "sudo",
+}
+
+# HARD-DENY — exact program basenames that must NEVER be captured or relaunched.
+DENY_EXACT = {
+    # The window manager itself (stripped launcher; must never be relaunched).
+    "lapivot", "ncde-lapivot",
+    # Panels / chrome / frames.
+    "ncde-frame", "ncde-container",
+    # The X11 session script (the thing that starts everything).
+    "ncde-x11-session",
+    # Every NCDE daemon/helper under /usr/local/bin (sentinel/appnap/mic/
+    # automount/stats/proxy/news/portal/session ... and their real binaries).
+    "sentinel", "ncde-sentinel",
+    "ncde-appnap",
+    "ncde-mic-helper", "ncde-mic",
+    "ncde-automount",
+    "ncde-stats-helper", "ncde-stats",
+    "ncde-proxy-apply", "ncde-proxy",
+    "ncde-news",
+    "ncde-portal", "xdg-desktop-portal-ncde",
+    "ncde-session",                      # this helper itself
+    "ncde-chromium-sync.sh",
+    # Session plumbing.
+    "xss-lock", "xsecurelock",
+    "dbus-daemon", "dbus-broker", "dbus-run-session", "dbus-launch",
+    "systemd", "systemd-logind",
+}
+
+# HARD-DENY — any basename CONTAINING one of these substrings is denied. Kept
+# tiny and unambiguous so it can never swallow a real user app.
+DENY_SUBSTR = ("lapivot", "picom", "xss-lock")
+
+
+def _is_denied_name(name):
+    if not name:
+        return False
+    n = name.lower()
+    if n in DENY_EXACT:
+        return True
+    if n.startswith("systemd-"):        # any systemd-* worker
+        return True
+    if n.startswith("xdg-desktop-portal"):
+        return True
+    for s in DENY_SUBSTR:
+        if s in n:
+            return True
+    return False
+
+
+# ALLOWLIST — curated genuine user apps. This is a FAST-ACCEPT path only; a real
+# GUI app not on this list is still accepted by the generic rule below, and a
+# denied name is never accepted regardless.
+ALLOW_EXACT = {
+    # NCDE house apps.
+    "orchidee", "binnie", "verve-text", "abacus", "magpie-talker",
+    "hummingbird-courier", "ncde-command", "ncde-terminal",
+    "ncde-chromium", "chromium", "chromium-browser",
+    # Dock apps.
+    "gimp", "spotify", "libreoffice", "soffice", "steam",
+}
+
+
+def _basename(token):
+    if not token:
+        return ""
+    # Strip a leading path; also ignore a login-shell "-" prefix.
+    b = os.path.basename(token)
+    if b.startswith("-"):
+        b = b[1:]
+    return b
+
+
+def program_names(argv):
+    """Candidate program basenames to test against the filter.
+
+    Returns argv[0]'s basename, plus (when argv[0] is a known interpreter or
+    wrapper) the basename of the first real program argument after it. This is
+    what makes `python3 .../lapivot` deny and `env A=b spotify` allow.
+    """
+    if not argv:
+        return []
+    names = []
+    first = _basename(argv[0])
+    if first:
+        names.append(first)
+    if first in INTERPRETERS and len(argv) > 1:
+        for tok in argv[1:]:
+            if not tok:
+                continue
+            if tok.startswith("-"):     # a flag (e.g. python -O)
+                continue
+            if "=" in tok and "/" not in tok:  # env VAR=VAL assignment
+                continue
+            names.append(_basename(tok))
+            break
+    return names
+
+
+def is_denied(argv, exe_basename=None):
+    """HARD-DENY test. True => never capture / never relaunch."""
+    for name in program_names(argv):
+        if _is_denied_name(name):
+            return True
+    if exe_basename and _is_denied_name(exe_basename):
+        return True
+    return False
+
+
+def is_allowed_user_app(argv, exe_ok):
+    """Accept test, applied only AFTER is_denied() has returned False.
+
+    Fast-accept curated apps; otherwise accept any genuine app that has a real
+    executable. (At save time the caller has already confirmed a normal
+    top-level window; that plus a real exec is 'a genuine GUI app'.)
+    """
+    for name in program_names(argv):
+        if name in ALLOW_EXACT:
+            return True
+    return bool(exe_ok)
+
+
+# ===========================================================================
+# X11 via libX11 / ctypes  (read-only enumeration; no event loop)
+# ===========================================================================
+
+AnyPropertyType = 0
+XA_STRING = 31
+XA_WINDOW = 33
+XA_CARDINAL = 6
+XA_ATOM = 4
+Success = 0
+IsViewable = 2
+InputOutput = 1
+
+
+class XWindowAttributes(ctypes.Structure):
+    _fields_ = [
+        ("x", ctypes.c_int), ("y", ctypes.c_int),
+        ("width", ctypes.c_int), ("height", ctypes.c_int),
+        ("border_width", ctypes.c_int), ("depth", ctypes.c_int),
+        ("visual", ctypes.c_void_p), ("root", ctypes.c_ulong),
+        ("c_class", ctypes.c_int),
+        ("bit_gravity", ctypes.c_int), ("win_gravity", ctypes.c_int),
+        ("backing_store", ctypes.c_int),
+        ("backing_planes", ctypes.c_ulong), ("backing_pixel", ctypes.c_ulong),
+        ("save_under", ctypes.c_int), ("colormap", ctypes.c_ulong),
+        ("map_installed", ctypes.c_int), ("map_state", ctypes.c_int),
+        ("all_event_masks", ctypes.c_long), ("your_event_mask", ctypes.c_long),
+        ("do_not_propagate_mask", ctypes.c_long),
+        ("override_redirect", ctypes.c_int), ("screen", ctypes.c_void_p),
+    ]
+
+
+XErrorHandlerType = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)
+XIOErrorHandlerType = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)
+
+
+class X11Unavailable(Exception):
+    pass
+
+
+class X11:
+    """Minimal read-only libX11 wrapper for one enumeration pass."""
+
+    _WALK_MAX_DEPTH = 8
+
+    def __init__(self):
+        libname = ctypes.util.find_library("X11")
+        if not libname:
+            raise X11Unavailable("libX11 not found")
+        self.lib = ctypes.CDLL(libname)
+        self._bind()
+        # Swallow all protocol errors: windows race away under us constantly.
+        self._err_cb = XErrorHandlerType(lambda d, e: 0)
+        self._ioerr_cb = XIOErrorHandlerType(self._on_ioerror)
+        self.lib.XSetErrorHandler(self._err_cb)
+        self.lib.XSetIOErrorHandler(self._ioerr_cb)
+        self.dpy = self.lib.XOpenDisplay(None)
+        if not self.dpy:
+            raise X11Unavailable(
+                "XOpenDisplay failed (DISPLAY=%r)" % os.environ.get("DISPLAY"))
+        self.root = self.lib.XDefaultRootWindow(self.dpy)
+        self.atoms = {}
+
+    def _on_ioerror(self, dpy):
+        # Connection lost; Xlib exits after we return. Nothing to save.
+        return 0
+
+    def _bind(self):
+        L = self.lib
+        L.XOpenDisplay.restype = ctypes.c_void_p
+        L.XOpenDisplay.argtypes = [ctypes.c_char_p]
+        L.XCloseDisplay.argtypes = [ctypes.c_void_p]
+        L.XDefaultRootWindow.restype = ctypes.c_ulong
+        L.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+        L.XInternAtom.restype = ctypes.c_ulong
+        L.XInternAtom.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+        L.XFree.argtypes = [ctypes.c_void_p]
+        L.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        L.XSetErrorHandler.restype = ctypes.c_void_p
+        L.XSetErrorHandler.argtypes = [XErrorHandlerType]
+        L.XSetIOErrorHandler.restype = ctypes.c_void_p
+        L.XSetIOErrorHandler.argtypes = [XIOErrorHandlerType]
+        L.XGetWindowAttributes.restype = ctypes.c_int
+        L.XGetWindowAttributes.argtypes = [
+            ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(XWindowAttributes)]
+        L.XQueryTree.restype = ctypes.c_int
+        L.XQueryTree.argtypes = [
+            ctypes.c_void_p, ctypes.c_ulong,
+            ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_ulong),
+            ctypes.POINTER(ctypes.POINTER(ctypes.c_ulong)),
+            ctypes.POINTER(ctypes.c_uint)]
+        L.XGetWindowProperty.restype = ctypes.c_int
+        L.XGetWindowProperty.argtypes = [
+            ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong,
+            ctypes.c_long, ctypes.c_long, ctypes.c_int, ctypes.c_ulong,
+            ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_ulong),
+            ctypes.POINTER(ctypes.POINTER(ctypes.c_ubyte))]
+        L.XTranslateCoordinates.restype = ctypes.c_int
+        L.XTranslateCoordinates.argtypes = [
+            ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong,
+            ctypes.c_int, ctypes.c_int,
+            ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_ulong)]
+
+    def close(self):
+        try:
+            if self.dpy:
+                self.lib.XCloseDisplay(self.dpy)
+        except Exception:
+            pass
+        self.dpy = None
+
+    def atom(self, name):
+        a = self.atoms.get(name)
+        if a is None:
+            a = self.lib.XInternAtom(self.dpy, name.encode(), 0)
+            self.atoms[name] = a
+        return a
+
+    def _get_property(self, win, prop_atom, req_type):
+        actual_type = ctypes.c_ulong()
+        actual_format = ctypes.c_int()
+        nitems = ctypes.c_ulong()
+        bytes_after = ctypes.c_ulong()
+        data = ctypes.POINTER(ctypes.c_ubyte)()
+        status = self.lib.XGetWindowProperty(
+            self.dpy, win, prop_atom, 0, 65536, 0, req_type,
+            ctypes.byref(actual_type), ctypes.byref(actual_format),
+            ctypes.byref(nitems), ctypes.byref(bytes_after), ctypes.byref(data))
+        if status != Success or not data:
+            return None
+        if actual_format.value == 0 or nitems.value == 0:
+            self.lib.XFree(data)
+            return None
+        return actual_format.value, nitems.value, data
+
+    def get_cardinals(self, win, prop_name, req_type=AnyPropertyType):
+        res = self._get_property(win, self.atom(prop_name), req_type)
+        if res is None:
+            return []
+        fmt, n, data = res
+        out = []
+        if fmt == 32:
+            arr = ctypes.cast(data, ctypes.POINTER(ctypes.c_ulong))
+            out = [arr[i] for i in range(n)]
+        self.lib.XFree(data)
+        return out
+
+    def get_first_cardinal(self, win, prop_name, req_type=AnyPropertyType):
+        vals = self.get_cardinals(win, prop_name, req_type)
+        return vals[0] if vals else None
+
+    def get_string(self, win, prop_name, req_type=AnyPropertyType):
+        """Return raw bytes of an 8-bit string property (or b'')."""
+        res = self._get_property(win, self.atom(prop_name), req_type)
+        if res is None:
+            return b""
+        fmt, n, data = res
+        out = b""
+        if fmt == 8:
+            out = bytes(bytearray(data[i] for i in range(n)))
+        self.lib.XFree(data)
+        return out
+
+    def get_window_attributes(self, win):
+        attrs = XWindowAttributes()
+        if self.lib.XGetWindowAttributes(self.dpy, win, ctypes.byref(attrs)) == 0:
+            return None
+        return attrs
+
+    def query_tree_children(self, win):
+        root_ret = ctypes.c_ulong()
+        parent_ret = ctypes.c_ulong()
+        children = ctypes.POINTER(ctypes.c_ulong)()
+        nchildren = ctypes.c_uint()
+        ok = self.lib.XQueryTree(
+            self.dpy, win, ctypes.byref(root_ret), ctypes.byref(parent_ret),
+            ctypes.byref(children), ctypes.byref(nchildren))
+        if ok == 0:
+            return []
+        out = [children[i] for i in range(nchildren.value)]
+        if children:
+            self.lib.XFree(children)
+        return out
+
+    def translate_to_root(self, win):
+        dx = ctypes.c_int()
+        dy = ctypes.c_int()
+        child = ctypes.c_ulong()
+        ok = self.lib.XTranslateCoordinates(
+            self.dpy, win, self.root, 0, 0,
+            ctypes.byref(dx), ctypes.byref(dy), ctypes.byref(child))
+        if ok == 0:
+            return None
+        return dx.value, dy.value
+
+    # --- top-level client windows -----------------------------------------
+    def window_pid(self, win):
+        pid = self.get_first_cardinal(win, "_NET_WM_PID", XA_CARDINAL)
+        if pid is None or pid <= 0:
+            return None
+        return int(pid)
+
+    def wm_class(self, win):
+        raw = self.get_string(win, "WM_CLASS", XA_STRING)
+        if not raw:
+            return ""
+        # WM_CLASS is "instance\0class\0"; prefer the class (2nd field).
+        parts = [p for p in raw.split(b"\x00") if p]
+        if not parts:
+            return ""
+        chosen = parts[1] if len(parts) > 1 else parts[0]
+        try:
+            return chosen.decode("utf-8", "replace")
+        except Exception:
+            return ""
+
+    def client_windows(self):
+        """Top-level client window ids. Prefer EWMH _NET_CLIENT_LIST; else walk
+        the tree from root (LaPivot does not publish _NET_CLIENT_LIST)."""
+        wins = self.get_cardinals(self.root, "_NET_CLIENT_LIST", XA_WINDOW)
+        if wins:
+            return [int(w) for w in wins if w]
+        found = []
+        seen = set()
+        stack = [(self.root, 0)]
+        while stack:
+            win, depth = stack.pop()
+            if depth > self._WALK_MAX_DEPTH:
+                continue
+            for child in self.query_tree_children(win):
+                if child in seen:
+                    continue
+                seen.add(child)
+                if self.window_pid(child) is not None:
+                    found.append(int(child))          # first PID-owning node
+                else:
+                    stack.append((child, depth + 1))
+        return found
+
+
+# ===========================================================================
+# /proc helpers
+# ===========================================================================
+
+def proc_cmdline(pid):
+    """Return argv list from /proc/PID/cmdline, or None."""
+    try:
+        with open("/proc/%d/cmdline" % pid, "rb") as f:
+            raw = f.read()
+    except OSError:
+        return None
+    if not raw:
+        return None
+    parts = raw.split(b"\x00")
+    argv = [p.decode("utf-8", "replace") for p in parts if p]
+    return argv or None
+
+
+def proc_exe_basename(pid):
+    try:
+        target = os.readlink("/proc/%d/exe" % pid)
+    except OSError:
+        return None, False
+    # readlink may append " (deleted)"; strip it for the name test.
+    clean = target.split(" (deleted)")[0]
+    return _basename(clean), os.path.exists(clean)
+
+
+def pid_alive(pid):
+    try:
+        os.stat("/proc/%d" % pid)
+        return True
+    except OSError:
+        return False
+
+
+# ===========================================================================
+# SAVE
+# ===========================================================================
+
+def collect_apps():
+    """Enumerate genuine user-app windows -> de-duplicated app records.
+
+    Returns (apps, saw_display). saw_display distinguishes 'display was up and
+    there were simply no user apps' (write empty) from 'could not see display'
+    (never clobber a good snapshot)."""
+    try:
+        x = X11()
+    except X11Unavailable as e:
+        log("no X display for save (%s); leaving snapshot untouched" % e)
+        return [], False
+    except Exception as e:
+        log("X init failed for save (%s); leaving snapshot untouched" % e)
+        return [], False
+
+    apps = []
+    seen_cmd = set()
+    try:
+        for win in x.client_windows():
+            try:
+                attrs = x.get_window_attributes(win)
+                if attrs is None:
+                    continue
+                if attrs.override_redirect != 0:      # menus/tooltips/docks
+                    continue
+                if attrs.c_class != InputOutput:      # InputOnly = not a real app
+                    continue
+                if attrs.width <= 0 or attrs.height <= 0:
+                    continue
+                pid = x.window_pid(win)
+                if pid is None or not pid_alive(pid):
+                    continue
+                argv = proc_cmdline(pid)
+                if not argv:
+                    continue
+                exe_name, exe_ok = proc_exe_basename(pid)
+                # HARD-DENY wins first (name in argv OR the real exe).
+                if is_denied(argv, exe_name):
+                    continue
+                if not is_allowed_user_app(argv, exe_ok):
+                    continue
+                key = tuple(argv)
+                if key in seen_cmd:
+                    continue
+                seen_cmd.add(key)
+                geom = {"x": attrs.x, "y": attrs.y,
+                        "width": attrs.width, "height": attrs.height}
+                root_xy = x.translate_to_root(win)
+                if root_xy is not None:
+                    geom["x"], geom["y"] = root_xy
+                apps.append({
+                    "cmdline": argv,
+                    "wm_class": x.wm_class(win),
+                    "geometry": geom,
+                })
+                if len(apps) >= MAX_APPS:
+                    break
+            except Exception as e:
+                log("skipping a window during save (%s)" % e)
+                continue
+    finally:
+        x.close()
+    return apps, True
+
+
+def atomic_write_json(path, obj):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp.%d" % os.getpid()
+    with open(tmp, "w") as f:
+        json.dump(obj, f, indent=2, sort_keys=False)
+        f.write("\n")
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
+
+def do_save():
+    apps, saw_display = collect_apps()
+    if not saw_display:
+        # Could not see the display: DO NOT overwrite a good snapshot.
+        return 0
+    snapshot = {
+        "version": SCHEMA_VERSION,
+        "saved_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "display": os.environ.get("DISPLAY", ""),
+        "apps": apps,
+    }
+    try:
+        atomic_write_json(SNAPSHOT, snapshot)
+        log("saved %d app(s) to %s" % (len(apps), SNAPSHOT))
+    except Exception as e:
+        log("failed to write snapshot (%s); session continues" % e)
+    return 0
+
+
+# ===========================================================================
+# RESTORE
+# ===========================================================================
+
+def _running_cmdlines():
+    """Set of tuple(argv) for currently-running processes (dedup guard)."""
+    running = set()
+    try:
+        pids = [int(d) for d in os.listdir("/proc") if d.isdigit()]
+    except OSError:
+        return running
+    for pid in pids:
+        argv = proc_cmdline(pid)
+        if argv:
+            running.add(tuple(argv))
+    return running
+
+
+def _resolve_launchable(argv):
+    """Return a launchable argv (exe resolvable) or None."""
+    if not argv:
+        return None
+    prog = argv[0]
+    if "/" in prog:
+        if os.path.exists(prog) and os.access(prog, os.X_OK):
+            return argv
+        return None
+    if shutil.which(prog):
+        return argv
+    return None
+
+
+def _launch(argv):
+    devnull = open(os.devnull, "r+b")
+    try:
+        subprocess.Popen(
+            argv,
+            stdin=devnull, stdout=devnull, stderr=devnull,
+            cwd=HOME,
+            start_new_session=True,     # detach: not our child's problem to reap
+            close_fds=True,
+        )
+        return True
+    except Exception as e:
+        log("launch failed for %r (%s)" % (argv[:1], e))
+        return False
+    finally:
+        devnull.close()
+
+
+def rotate_snapshot():
+    """Move session.json aside so a re-trigger never double-launches. Keep a few
+    rotated copies for forensic/undo value, prune the rest."""
+    if not os.path.exists(SNAPSHOT):
+        return
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    dest = "%s.%s.restored" % (SNAPSHOT, stamp)
+    try:
+        os.replace(SNAPSHOT, dest)
+    except Exception as e:
+        log("could not rotate snapshot (%s)" % e)
+        return
+    try:
+        rotated = sorted(
+            f for f in os.listdir(CONFIG_DIR)
+            if f.startswith("session.json.") and f.endswith(".restored"))
+        for old in rotated[:-KEEP_ROTATED]:
+            try:
+                os.remove(os.path.join(CONFIG_DIR, old))
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+
+def do_restore():
+    if not os.path.exists(SNAPSHOT):
+        log("no snapshot to restore")
+        return 0
+    try:
+        with open(SNAPSHOT) as f:
+            snap = json.load(f)
+    except Exception as e:
+        log("snapshot unreadable (%s); not restoring" % e)
+        # Rotate the bad file aside so it does not block the next save.
+        rotate_snapshot()
+        return 0
+
+    apps = snap.get("apps") if isinstance(snap, dict) else None
+    if not isinstance(apps, list):
+        log("snapshot has no app list; nothing to restore")
+        rotate_snapshot()
+        return 0
+
+    running = _running_cmdlines()
+    launched = 0
+    for entry in apps[:MAX_APPS]:
+        try:
+            if not isinstance(entry, dict):
+                continue
+            argv = entry.get("cmdline")
+            if not isinstance(argv, list) or not argv:
+                continue
+            if not all(isinstance(t, str) for t in argv):
+                continue
+            # DEFENCE IN DEPTH: re-apply HARD-DENY at restore time. A stale or
+            # hand-edited JSON can NEVER resurrect the WM/panels/daemons/self.
+            if is_denied(argv):
+                log("refusing denied entry at restore: %r" % (argv[:1],))
+                continue
+            if tuple(argv) in running:            # already up -> don't duplicate
+                continue
+            launchable = _resolve_launchable(argv)
+            if launchable is None:
+                log("skipping unresolved exec: %r" % (argv[:1],))
+                continue
+            if _launch(launchable):
+                launched += 1
+                time.sleep(0.15)                  # gentle stagger; avoid a spike
+        except Exception as e:
+            log("skipping one restore entry (%s)" % e)
+            continue
+
+    log("restored %d app(s)" % launched)
+    # Rotate regardless of individual failures so we never re-launch this set.
+    rotate_snapshot()
+    return 0
+
+
+# ===========================================================================
+# entry point
+# ===========================================================================
+
+USAGE = "usage: ncde-session {save|restore}\n"
+
+
+def main(argv):
+    mode = argv[1] if len(argv) > 1 else ""
+    if mode == "save":
+        return do_save()
+    if mode == "restore":
+        return do_restore()
+    sys.stderr.write(USAGE)
+    return 0            # never fail hard: a bad invocation must not break logout
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv))
+    except SystemExit:
+        raise
+    except Exception as e:
+        # Absolute last resort: nothing may crash the session.
+        log("unexpected error (%s); exiting 0" % e)
+        sys.exit(0)

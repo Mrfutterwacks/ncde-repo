@@ -1,0 +1,4 @@
+#!/bin/bash
+# fn <Class::name> [file] — print decomp functions whose header matches exactly
+F=${2:-/run/media/stephen/NCDE-BACKUP/my-project/source-recovery/LaPivot/decomp/Lelan.c}
+awk -v n="$1" '/^\/\/ ==== [0-9a-f]+  /{p=($4==n)} p' "$F"

@@ -1,0 +1,57 @@
+#!/bin/bash
+# INSTALL-L2.sh — install the rebuilt LaPivot as a test session "NCDE L2" beside the current LaPivot.
+# Run ONLY by the operator, after the build links and they say so. Agents write this; do not run it.
+# Result:
+#   /usr/local/bin/LaPivot-L2                     (current /usr/local/bin/LaPivot untouched)
+#   /usr/share/ncde-l2/                           (current LaPivot keeps /usr/share/ncde/)
+#   /usr/local/bin/ncde-x11-session-l2
+#   /usr/share/xsessions/ncde-l2.desktop          (Name=NCDE L2)
+# ncde-portal already lists /usr/share/xsessions/*.desktop — nothing in ncde-portal changes.
+set -euo pipefail
+
+BIN_SRC="/usr/local/bin/LaPivot"          # built by the CMake install step
+BIN_DST="/usr/local/bin/LaPivot-L2"
+ASSET_SRC="/usr/share/ncde/"              # current LaPivot's asset dir (read-only reference)
+ASSET_DST="/usr/share/ncde-l2/"
+SESSION_SCRIPT="/usr/local/bin/ncde-x11-session-l2"
+DESKTOP_FILE="/usr/share/xsessions/ncde-l2.desktop"
+
+# 1. Copy the binary
+install -m 755 "$BIN_SRC" "$BIN_DST"
+# The CMake install step already did: setcap cap_sys_nice+ep "$BIN_SRC"
+# The copy inherits the capability. If it didn't, re-apply:
+setcap cap_sys_nice+ep "$BIN_DST" 2>/dev/null || true
+
+# 2. Copy the QML/assets tree to the L2 location
+# The operator's canonical QML tree is at /run/media/stephen/NCDE-BACKUP/my-project/files/full-patch-20260711/src/usr/share/ncde/
+# But the build installs to /usr/share/ncde/ (current LaPivot). We copy from there.
+rsync -a --delete "$ASSET_SRC" "$ASSET_DST"
+
+# 3. Write the L2 session script (sets NCDE_ASSET_BASE so LaPivot-L2 loads /usr/share/ncde-l2/)
+cat > "$SESSION_SCRIPT" <<'EOF'
+#!/bin/bash
+# ncde-x11-session-l2 — X11 session for the LaPivot-L2 test build.
+# LaPivot reads NCDE_ASSET_BASE to find its QML tree.
+export NCDE_ASSET_BASE=/usr/share/ncde-l2/
+exec /usr/local/bin/LaPivot-L2 "$@"
+EOF
+chmod 755 "$SESSION_SCRIPT"
+
+# 4. Write the XSession desktop file
+cat > "$DESKTOP_FILE" <<'EOF'
+[Desktop Entry]
+Name=NCDE L2
+Comment=NCDE desktop (L2 test session)
+Exec=/usr/local/bin/ncde-x11-session-l2
+Type=Application
+DesktopNames=NCDE-L2
+X-Ubuntu-Gettext-Domain=ncde
+EOF
+
+echo "L2 installed:"
+echo "  Binary:      $BIN_DST"
+echo "  Assets:      $ASSET_DST"
+echo "  Session:     $SESSION_SCRIPT"
+echo "  XSession:    $DESKTOP_FILE"
+echo ""
+echo "Log out and choose 'NCDE L2' from the session menu (ncde-portal lists it)."

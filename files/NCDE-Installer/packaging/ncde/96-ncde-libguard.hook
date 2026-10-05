@@ -1,0 +1,11 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Operation = Remove
+Type = Package
+Target = *
+
+[Action]
+Description = NCDE libguard: checking NCDE's programs still have every library...
+When = PostTransaction
+Exec = /usr/lib/ncde-update/ncde-libguard post

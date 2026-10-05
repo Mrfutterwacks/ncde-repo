@@ -1,0 +1,10 @@
+#%PAM-1.0
+# /etc/pam.d/ncde-lock — in-session re-auth for the locker. Must NOT use
+# system-login (that opens a new login session and can lock the user out); use
+# system-auth, which only verifies the secret. pam_faillock in the Arch
+# system-auth stack provides the repeated-failure lockout (configure deny/
+# unlock_time in /etc/security/faillock.conf). Do not add a second counter.
+# Optional fingerprint: uncomment the next line (this file only).
+# auth     sufficient pam_fprintd.so
+auth     include    system-auth
+account  include    system-auth

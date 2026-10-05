@@ -1,0 +1,4 @@
+#!/bin/sh
+# /usr/bin/ncde-screensaver-notify — the xss-lock idle notifier. Launches Portal's
+# screensaver in standalone mode; the desktop passes --season, which we forward.
+exec ncde-portal --screensaver "$@"

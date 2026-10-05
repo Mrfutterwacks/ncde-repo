@@ -1,0 +1,12 @@
+# Idle: pollUserIdle polls xcb screensaver idle every 2000 ms (oracle: disassembly `mov $0x7d0`),
+# sets AnimPolicy::onUserInputIdle at 30 s and latches screensaverIdleReached. The rebuilt
+# Settings now owns idle decisions (src/IdlePolicy.h, src/Settings_power.cpp): ADD a signal
+# `idleSample(qint64 idleMs)` emitted on every poll and invokable `userIdleMs()`
+# (live xcb query) as declared additions; keep the oracle members. 2026-10-01.
+    signal:     public void idleSample(qlonglong idleMs);
+    Q_INVOKABLE public qlonglong userIdleMs();
+
+# main.qml:238 polls a file via XHR every 250 ms forever (_pollIconify <- ncde-iconify-bridge)
+# — anim-policy.md §4.4 violation: provide the iconify request as an event (X11 property
+# / ClientMessage handled by the WM -> a signal). 2026-10-01.
+    signal:     public void iconifyRequest(uint win, uint serial);

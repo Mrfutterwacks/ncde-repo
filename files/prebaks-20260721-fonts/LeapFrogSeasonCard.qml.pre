@@ -1,0 +1,187 @@
+// LeapFrogSeasonCard.qml — a real calendar's seasonal art plate, for NCDE.
+//
+// Like the painted plate at the top of a paper calendar: the CURRENT season
+// (from the system clock) shown as an illuminated card — seasonal botanical
+// art, the date, and a "thought for the day" that turns with the day-of-year.
+// Frameless parchment popup with its own close jewel (picom-safe, like the
+// other Glia popups).
+//
+// Optional: set `plate` to a user image (file:///…) to use real artwork in the
+// frame instead of the drawn motif — "inspirational thought of the day" photos.
+//
+//   LeapFrogSeasonCard { id: seasonCard }
+//   ... seasonCard.show()                       // opens for today's season
+import QtQuick
+import "cal-art.js" as Art
+
+Window {
+    id: win
+    flags: Qt.FramelessWindowHint | Qt.BypassWindowManagerHint
+           | Qt.WindowStaysOnTopHint | Qt.WindowDoesNotAcceptFocus
+    color: "transparent"
+    width:  520
+    height: 600
+    x: Math.round((Screen.width  - width)  / 2)
+    y: Math.round((Screen.height - height) / 2)
+    visible: false
+
+    property url plate: ""        // optional real artwork; empty → drawn motif
+
+    NCDEKit { id: k }
+    readonly property color gold1: k.gilt0
+    readonly property color gold2: k.gilt1
+    readonly property color goldLeading: Qt.rgba(240/255,210/255,122/255,1)
+    readonly property color burg2: k.wine2
+    readonly property color burg4: k.wine4
+    readonly property color ink:   k.ink
+
+    // ── current season + day, from the system clock ──
+    property date today: new Date()
+    readonly property int  month: today.getMonth()
+    readonly property string season:
+        (month >= 2 && month <= 4) ? "spring" :
+        (month >= 5 && month <= 7) ? "summer" :
+        (month >= 8 && month <= 10) ? "autumn" : "winter"
+    function dayOfYear(d) {
+        var s = new Date(d.getFullYear(), 0, 0)
+        return Math.floor((d - s) / 86400000)
+    }
+
+    readonly property var meta: ({
+        "spring": { title: "Spring",  eyebrow: "THE POND WAKES",
+                    sky: ["#bfe3d0", "#7fc6a6"], accent: "#3e8e6a", motif: "blossom",
+                    lines: ["New shoots keep no record of last winter — begin again.",
+                            "The frog leaps not because it is sure, but because it is spring.",
+                            "Small green things are patient. Be likewise.",
+                            "Every lily pad was once a seed that refused to quit."] },
+        "summer": { title: "Summer",  eyebrow: "THE POND AT ITS FULLEST",
+                    sky: ["#cfe6f2", "#7db6d8"], accent: "#2f7ab0", motif: "sun",
+                    lines: ["Long days are a gift; do not spend them all indoors.",
+                            "Still water and a warm sun — ambition can wait an hour.",
+                            "The pond is widest now. Swim out a little.",
+                            "Bask, then leap. In that order."] },
+        "autumn": { title: "Autumn",  eyebrow: "THE POND TURNS GOLD",
+                    sky: ["#f0dcae", "#cf9a52"], accent: "#b06a22", motif: "leaf",
+                    lines: ["Gather what the season gave you; let the rest drift.",
+                            "A falling leaf is not failure — it is a debt repaid.",
+                            "Store light for the dark months. You will need it.",
+                            "The pond keeps what matters and lets the leaves go."] },
+        "winter": { title: "Winter",  eyebrow: "THE POND RESTS",
+                    sky: ["#dfe7ef", "#9fb2c4"], accent: "#5b7088", motif: "snow",
+                    lines: ["Under the ice, the frog dreams. Rest is also work.",
+                            "Quiet is not empty. The pond is only thinking.",
+                            "Keep one small lamp lit; spring is reading the map.",
+                            "What sleeps in winter leaps in spring."] }
+    })
+    readonly property var info: meta[season]
+    readonly property string thought: info.lines[dayOfYear(today) % info.lines.length]
+
+    function show() { today = new Date(); visible = true; raise(); art.requestPaint() }
+    function hide() { visible = false }
+
+    opacity: 0
+    Behavior on opacity { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+    onVisibleChanged: opacity = visible ? 1 : 0
+
+    Item {
+        anchors.fill: parent
+        scale: win.opacity < 1 ? 0.98 : 1.0
+        transformOrigin: Item.Center
+        Behavior on scale { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+
+        NCDEParchmentSurface { anchors.fill: parent; cornerRadius: 16 }
+
+        Column {
+            anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right
+            anchors.topMargin: 26
+            anchors.leftMargin: 30; anchors.rightMargin: 30
+            spacing: 4
+
+            Text { text: win.info.eyebrow; color: win.gold1
+                   font.family: theme.titleFont; font.pixelSize: theme.fontSmall; font.letterSpacing: 5
+                   anchors.horizontalCenter: parent.horizontalCenter }
+            Text { text: win.info.title; color: win.burg2
+                   font.family: theme.titleFont; font.bold: true
+                   font.pixelSize: theme.fontMedium + theme.scale(14)
+                   anchors.horizontalCenter: parent.horizontalCenter }
+            Text { text: Qt.formatDate(win.today, "dddd, d MMMM yyyy"); color: win.gold2
+                   font.family: theme.fontFamily; font.italic: true
+                   font.pixelSize: theme.fontMedium
+                   anchors.horizontalCenter: parent.horizontalCenter }
+        }
+
+        // ── art plate (drawn motif, or the user's `plate` image) ──
+        Rectangle {
+            id: frame
+            anchors.horizontalCenter: parent.horizontalCenter
+            y: 120
+            width: parent.width - 64
+            height: 300
+            radius: 10
+            color: "#00000000"
+            border.width: 2; border.color: win.goldLeading
+
+            Rectangle {                              // sky wash
+                anchors.fill: parent; anchors.margins: 3; radius: 8; clip: true
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: win.info.sky[0] }
+                    GradientStop { position: 1.0; color: win.info.sky[1] }
+                }
+                Canvas {
+                    id: art
+                    anchors.fill: parent
+                    renderStrategy: Canvas.Cooperative
+                    visible: win.plate === ""
+                    onPaint: {
+                        var ctx = getContext("2d"); ctx.reset()
+                        Art.CalArt.paintSeasonHeader(ctx, 0, 0, width, height, win.season)
+                    }
+                }
+                Image {
+                    anchors.fill: parent
+                    visible: win.plate !== ""
+                    source: win.plate
+                    fillMode: Image.PreserveAspectCrop
+                    asynchronous: true; cache: true
+                }
+            }
+        }
+
+        // ── thought for the day ──
+        Text {
+            anchors.top: frame.bottom; anchors.topMargin: 22
+            anchors.left: parent.left; anchors.right: parent.right
+            anchors.leftMargin: 40; anchors.rightMargin: 40
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.WordWrap
+            text: "“" + win.thought + "”"
+            color: win.burg4
+            font.family: theme.fontFamily; font.italic: true
+            font.pixelSize: theme.fontMedium + theme.scale(3)
+        }
+
+        // close jewel
+        Item {
+            width: 30; height: 30
+            anchors.top: parent.top; anchors.right: parent.right
+            anchors.topMargin: 14; anchors.rightMargin: 16
+            Canvas {
+                anchors.fill: parent; renderStrategy: Canvas.Cooperative
+                property bool hov: ch.hovered
+                onHovChanged: requestPaint()
+                onPaint: {
+                    var ctx = getContext("2d"); ctx.reset()
+                    var cx = width/2, cy = height/2, r = width/2 - 2
+                    ctx.beginPath(); ctx.moveTo(cx,cy-r); ctx.lineTo(cx+r,cy); ctx.lineTo(cx,cy+r); ctx.lineTo(cx-r,cy); ctx.closePath()
+                    ctx.fillStyle = hov ? ncde.wine4 : ncde.wine2; ctx.fill()
+                    ctx.strokeStyle = hov ? ncde.gilt4 : ncde.gilt3; ctx.lineWidth = 1.5; ctx.stroke()
+                    ctx.strokeStyle = ncde.surface; ctx.lineWidth = 1.8; ctx.lineCap = "round"
+                    var d = r*0.42
+                    ctx.beginPath(); ctx.moveTo(cx-d,cy-d); ctx.lineTo(cx+d,cy+d); ctx.moveTo(cx+d,cy-d); ctx.lineTo(cx-d,cy+d); ctx.stroke()
+                }
+            }
+            HoverHandler { id: ch }
+            TapHandler { onTapped: win.hide() }
+        }
+    }
+}

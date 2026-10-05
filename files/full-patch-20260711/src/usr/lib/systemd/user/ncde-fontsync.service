@@ -1,0 +1,6 @@
+[Unit]
+Description=NCDE font settings mirror for house apps
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/ncde-fontsync

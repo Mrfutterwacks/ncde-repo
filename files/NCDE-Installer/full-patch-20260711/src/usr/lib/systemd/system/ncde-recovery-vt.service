@@ -1,0 +1,24 @@
+[Unit]
+Description=NCDE System Restore ("Soundings") — graphical recovery on tty8
+Documentation=file:///usr/share/ncde/recovery/
+Conflicts=getty@tty8.service
+After=systemd-user-sessions.service plymouth-quit.service
+
+[Service]
+Type=simple
+# Runs the recovery UI directly on tty8 with no X (eglfs/KMS; linuxfb fallback).
+# DRM master passes to tty8 only when it is the active VT (logind VT handoff),
+# so it coexists with the desktop on tty1.
+Environment=QT_QPA_PLATFORM=eglfs
+ExecStart=/usr/local/bin/ncde-recovery
+TTYPath=/dev/tty8
+TTYReset=yes
+TTYVHangup=yes
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

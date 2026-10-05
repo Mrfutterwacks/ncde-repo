@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Install/Update NCDE (this machine)
+Comment=Double-click, enter your password when asked — installs/updates NCDE to match the reference machine
+Exec=bash -c "cd \"\$(dirname \"%k\")\" && sudo bash ./ncde-full-patch-20260711.sh; echo; read -p 'Done — press Enter to close this window...' _"
+Terminal=true
+Icon=utilities-terminal
+Categories=System;
+NoDisplay=false

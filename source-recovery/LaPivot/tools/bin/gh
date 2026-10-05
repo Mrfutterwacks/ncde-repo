@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+"""gh <addr> [n]  — read bytes at a Ghidra (image-base 0x100000) address of the oracle.
+gh str <addr>    — as UTF-16LE (Qt QStringLiteral in .rodata) until NUL.
+gh cstr <addr>   — as ASCII/UTF-8 C string until NUL.
+gh dump <addr> <n> — hex bytes.
+"""
+import sys, struct
+
+BIN = "/run/media/stephen/NCDE-BACKUP/my-project/source-recovery/LaPivot/oracle/LaPivot.oracle"
+BASE = 0x100000
+
+f = open(BIN, "rb")
+# vaddr == file offset for this binary (checked: .text 0x39d30 off 0x39d30, .rodata 0x192000/0x192000)
+
+def off(a):
+    return a - BASE
+
+def rd_raw(a, n):
+    f.seek(a)   # vaddr == file offset in this binary
+    return f.read(n)
+
+def rd(a, n):
+    f.seek(off(a))
+    return f.read(n)
+
+def rd16(a):
+    f.seek(off(a))
+    d = f.read(4)
+    return struct.unpack("<I", d[:4])[0]
+
+if sys.argv[1] == "str":
+    a = int(sys.argv[2], 16)
+    d = rd(a, 4000)
+    out = []
+    for i in range(0, len(d) - 1, 2):
+        c = struct.unpack_from("<H", d, i)[0]
+        if c == 0:
+            break
+        out.append(chr(c))
+    print("".join(out))
+elif sys.argv[1] == "cstr":
+    a = int(sys.argv[2], 16)
+    d = rd(a, 4000)
+    print(d.split(b"\0")[0].decode("utf-8", "replace"))
+elif sys.argv[1] == "ptr":
+    a = int(sys.argv[2], 16)
+    for i in range(int(sys.argv[3]) if len(sys.argv) > 3 else 1):
+        print(hex(rd16(a + 8 * i)))
+elif sys.argv[1] == "dump":
+    a = int(sys.argv[2], 16)
+    n = int(sys.argv[3])
+    d = rd(a, n)
+    for i in range(0, len(d), 16):
+        chunk = d[i:i+16]
+        print("%08x  %s  |%s|" % (a + i, " ".join("%02x" % b for b in chunk),
+              "".join(chr(b) if 32 <= b < 127 else "." for b in chunk)))
+elif sys.argv[1] == "vstr":   # real vaddr (reloc addends), no base subtraction
+    a = int(sys.argv[2], 16)
+    d = rd_raw(a, 4000)
+    print(d.split(b"\0")[0].decode("utf-8", "replace"))
+elif sys.argv[1] == "vstr16":
+    a = int(sys.argv[2], 16)
+    d = rd_raw(a, 4000)
+    print(d.decode("utf-16-le", "replace").split("\0")[0])
+elif sys.argv[1] == "qstr":
+    # QString data struct at addr: {QArrayData* d; int size;} then UTF-16 at d+0x18 offset? no:
+    # Qt6 QStringLiteral rodata is just the char16 array. Try reading at given addr as utf16 until NUL.
+    a = int(sys.argv[2], 16)
+    n = int(sys.argv[3]) if len(sys.argv) > 3 else 200
+    d = rd(a, n)
+    print(d.decode("utf-16-le", "replace").split("\0")[0])

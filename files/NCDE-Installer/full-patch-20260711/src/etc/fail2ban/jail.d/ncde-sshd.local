@@ -1,0 +1,10 @@
+# NCDE fix 2026-07-10 — minimal sshd jail so Vesper's fail2ban engine has a
+# data source (vesper.md: five engines; fail2ban was installed but never ran).
+[sshd]
+enabled   = true
+backend   = systemd
+banaction = nftables
+maxretry  = 5
+findtime  = 1d
+bantime   = 2w
+ignoreip  = 127.0.0.1/8 ::1

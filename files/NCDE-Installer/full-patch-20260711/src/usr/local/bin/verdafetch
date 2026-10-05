@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+# verdafetch — Verda's greeting. Complex rose + NCDE system info.
+
+esc=$'\033'
+R="${esc}[0m"
+B="${esc}[1m"
+ROSE="${esc}[1;38;2;207;101;146m"
+KEY="${esc}[1;38;2;244;208;96m"
+VAL="${esc}[38;2;244;217;164m"
+DIM="${esc}[38;2;122;106;76m"
+
+# nowdoc — single-quoted EOF: backticks, single quotes, $ all literal
+mapfile -t ART <<'ARTEOF'
+                      ..,,..    ...,,.
+      ,%,                .. ,#########::#########:,
+      :#%%,           ,,:',####%%%%%%##:`::%%%%####,
+     ,##%%%%,      ,##%% ,##%%%:::::''%' `::::%%####,
+     %###%%;;,   ,###%%:,##%%:::''    '  . .`:::%%###,
+    :####%%;;:: ,##%:' ,#%::''   .,,,..    . .`::%%%##,
+    %####%;;::,##%:' ,##%''  ,%%########%     . `:::%%##,
+    ######:::,##%:',####:  ,##%%:''     `%%,     .`::%%##,
+    :#####%:'##%:',#####' ,###%' ,%%%%,%%,'%,     . ::%%###,,..
+     #####%:,#%:'#######  %%:'%  %'  `%% %% %%,.     '::%%#######,
+     `####%,#%:',####### ::' %   ' ,%%%%%%, ::%%.    . '::%%######
+      `###'##%: ######## ,.   %%  %%,   ':: `:%%%  :  . .:::%%###'
+      ,,::,###  %%%%%### ::  % %% '%%%,.::: .:%%%   #.  . ::%%%#'
+,,,:::%%##:;#   `%%%%%## :% ,%, %   ':%%:'  #%%%' ,.:##.  ::%#'
+::%%#####% %%:::  :::%%% `%%,'%%     ..,,%####' :%# `::##, ''
+###%%::'###%::: .   `:::, `::,,%%%######%%'',::%##' ,:::%##
+''''   ,####%:::. .  `::%,     '':%%::' .,::%%%#'   :::%%%##,
+      :#%%'##%:::.  . . "%::,,.. ..,,,,::%%%###'  ,:%%%%####'
+     ,###%%'###%:::: . . `::::::::::%%%#####'   ,::%####:'
+     %###%%;'###%::::.   .`::%%%%%%%#####:'  ,,::%%##:'
+     ####%;:;'####%:::::.   `:%######::'  ,,:::%%###
+     %####;:;'######%%::::.           ,::::%%%####'
+     `####%;:'`#########%%:::....,,:::%%%#######'
+        ;#####;;'..;;:::#########::%%#########:"'
+                       ~~~~``````''''~~~
+ARTEOF
+
+user=$(whoami 2>/dev/null || echo user)
+host=$(hostname 2>/dev/null || echo ncde)
+kernel=$(uname -r 2>/dev/null || echo "?")
+sh_name=$(basename "${SHELL:-/bin/sh}")
+os="NCDE Poseidon"
+if [ -r /etc/os-release ]; then
+    . /etc/os-release 2>/dev/null
+    [ -n "$PRETTY_NAME" ] && os="$PRETTY_NAME"
+fi
+up=$(uptime -p 2>/dev/null | sed 's/^up //'); [ -z "$up" ] && up="?"
+
+# Packages (local package db — no subprocess)
+pkgs=$(ls /var/lib/pacman/local 2>/dev/null | wc -l)
+[ "$pkgs" -eq 0 ] 2>/dev/null && pkgs="?"
+
+# CPU
+cpu=$(grep -m1 "model name" /proc/cpuinfo 2>/dev/null \
+      | sed 's/.*: //;s/(TM)//g;s/(R)//g;s/ CPU//;s/ @ .*//')
+[ -z "$cpu" ] && cpu="?"
+
+# Memory  MiB used / total
+mem_total=$(awk '/^MemTotal/{print $2}' /proc/meminfo 2>/dev/null)
+mem_avail=$(awk '/^MemAvailable/{print $2}' /proc/meminfo 2>/dev/null)
+if [ -n "$mem_total" ] && [ -n "$mem_avail" ]; then
+    mem="$(( (mem_total - mem_avail) / 1024 ))MiB / $(( mem_total / 1024 ))MiB"
+else
+    mem="?"
+fi
+
+# GPU
+gpu=$(lspci 2>/dev/null | grep -iE "VGA|3D controller|Display controller" \
+      | sed 's/.*: //;s/ (rev [0-9a-f]*)//g' | head -1)
+[ -z "$gpu" ] && gpu="?"
+
+# Disk (root partition)
+disk=$(df -BM / 2>/dev/null | awk 'NR==2{
+    gsub(/M/,"",$3); gsub(/M/,"",$2); print $3"MiB / "$2"MiB ("$5" used)"}')
+[ -z "$disk" ] && disk="?"
+
+# Resolution
+res=$(xrandr 2>/dev/null | grep " connected" | grep -oP '\d+x\d+' | head -1)
+[ -z "$res" ] && res=$(cat /sys/class/drm/*/modes 2>/dev/null | sort -rn | head -1)
+[ -z "$res" ] && res="?"
+
+INFO=(
+    "${ROSE}${B}${user}${DIM}@${ROSE}${host}${R}"
+    "${DIM}─────────────────────────${R}"
+    "${KEY}OS        ${R}${VAL}${os}${R}"
+    "${KEY}Kernel    ${R}${VAL}${kernel}${R}"
+    "${KEY}Packages  ${R}${VAL}${pkgs}${R}"
+    "${KEY}Shell     ${R}${VAL}${sh_name}${R}"
+    "${KEY}Resolution ${R}${VAL}${res}${R}"
+    "${KEY}Terminal  ${R}${VAL}NCDE Terminal — Verda${R}"
+    "${KEY}WM        ${R}${VAL}ncde-wm (Motif)${R}"
+    "${KEY}Theme     ${R}${VAL}Tiffany Glass${R}"
+    "${KEY}CPU       ${R}${VAL}${cpu}${R}"
+    "${KEY}GPU       ${R}${VAL}${gpu}${R}"
+    "${KEY}Memory    ${R}${VAL}${mem}${R}"
+    "${KEY}Disk      ${R}${VAL}${disk}${R}"
+    "${KEY}Uptime    ${R}${VAL}${up}${R}"
+)
+
+maxart=0
+for l in "${ART[@]}"; do len=${#l}; [ "$len" -gt "$maxart" ] && maxart=$len; done
+
+rows=${#ART[@]}
+irows=${#INFO[@]}
+[ "$irows" -gt "$rows" ] && rows=$irows
+
+printf '\n'
+for ((i=0; i<rows; i++)); do
+    printf '%s%-*s%s  %s\n' "${ROSE}" "$maxart" "${ART[$i]:-}" "${R}" "${INFO[$i]:-}"
+done
+printf '\n'

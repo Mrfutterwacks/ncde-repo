@@ -1,0 +1,8 @@
+/* NCDE — managed by NCDEEngine. Do not edit. */
+/* GTK4 seed. The engine swaps the palette import (_palette-dark ↔ _palette-light)
+   in place on mode change. DEFINES ONLY — no rules imported here: full widget
+   rules in the GTK4 user css corrupt libadwaita apps. Dark/light for GTK4 apps
+   rides on settings.ini prefer-dark + the gsettings color-scheme the engine sets;
+   these defines re-ground apps that consume the compat named colors. */
+@import url("_palette-dark.css");
+@import url("_accent.css");

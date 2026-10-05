@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Verdantfolio
+GenericName=Résumé Writer
+Comment=Compose a résumé with GiGi and send it on its way
+Exec=/usr/local/bin/verdantfolio
+Icon=x-office-document
+Terminal=false
+Categories=Office;WordProcessor;
+Keywords=resume;cv;writer;gigi;job;application;
+StartupNotify=true

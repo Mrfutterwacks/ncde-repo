@@ -1,0 +1,11 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Operation = Remove
+Type = Package
+Target = *
+
+[Action]
+Description = NCDE libguard: saving the libraries NCDE's programs use...
+When = PreTransaction
+Exec = /usr/lib/ncde-update/ncde-libguard pre

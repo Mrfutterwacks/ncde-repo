@@ -1,0 +1,5 @@
+singleton SetTheme 1.0 SetTheme.qml
+singleton WidgetSpacingStore 1.0 WidgetSpacingStore.qml
+singleton WallInk 1.0 WallInk.qml
+singleton ShellLight 1.0 ShellLight.qml
+singleton IrisLive 1.0 IrisLive.qml

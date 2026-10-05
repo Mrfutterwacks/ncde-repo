@@ -1,0 +1,8 @@
+[Unit]
+Description=NCDE fonts.json -> font.json mirror (house apps watch font.json)
+
+[Path]
+PathChanged=%h/.config/ncde/fonts.json
+
+[Install]
+WantedBy=default.target

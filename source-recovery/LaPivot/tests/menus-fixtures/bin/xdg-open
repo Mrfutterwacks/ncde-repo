@@ -1,0 +1,2 @@
+#!/bin/sh
+printf 'OPEN:%s\n' "$1" >> "$MENU_TEST_RECORD"

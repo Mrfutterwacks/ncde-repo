@@ -1,0 +1,164 @@
+#!/usr/bin/env python3
+# ncde-mic-helper — NCDE live microphone peak bridge (userspace, no binary changes).
+#
+# WHY: SoundTab.qml's INPUT "Level" meter is bound to settings.inputLevel — a
+# PERSISTED preference with no live source, so the bar never moves. The stripped
+# LaPivot/ncde-command binaries expose no live source-peak property and we cannot
+# recompile them. So — exactly like the proven WeatherLive.qml / StatsLive.qml
+# pattern — this small helper writes JSON to a well-known path and QML reads it
+# via a file:// XHR. This process only opens a recording stream on the default
+# PulseAudio/PipeWire *source* and writes its own JSON file. Nothing near
+# ncde-portal / logind / the WM.
+#
+# HOW IT READS THE PEAK: it runs `parec` (PulseAudio record client; the server is
+# PipeWire's pulse compat, `pactl info` confirms) on the current default source as
+# signed-16-bit mono @ 48 kHz. Every ~100 ms chunk (4800 samples) it takes the
+# real sample peak  max(|s|)/32768  and maps it to 0..100. That is a true live
+# input peak: ~0 in silence, rises when you speak / make noise.
+#
+# Output path:  $XDG_RUNTIME_DIR/ncde-mic.json   (fallback ~/.cache/ncde/mic.json)
+#               { "level": 0..100, "ts": <unix>, "source": "<name>", "live": bool }
+# Cadence:      ~10 writes/sec, atomic replace so readers never see a half file.
+#
+# SAFETY: every failure (no parec, source gone, unreadable) degrades to level 0
+# and a respawn — it can never crash and never touches anything but its own file.
+
+import array
+import json
+import os
+import subprocess
+import sys
+import time
+
+RATE = 48000
+CHANNELS = 1
+CHUNK_SAMPLES = RATE // 10          # ~100 ms -> ~10 writes/sec
+CHUNK_BYTES = CHUNK_SAMPLES * 2     # s16le = 2 bytes/sample, mono
+FULL_SCALE = 32768.0
+
+
+def out_path():
+    """Prefer the per-user runtime dir, else ~/.cache/ncde (mirrors stats helper)."""
+    rt = os.environ.get("XDG_RUNTIME_DIR")
+    if rt and os.path.isdir(rt):
+        return os.path.join(rt, "ncde-mic.json")
+    cache = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
+    d = os.path.join(cache, "ncde")
+    try:
+        os.makedirs(d, exist_ok=True)
+    except OSError:
+        pass
+    return os.path.join(d, "mic.json")
+
+
+def default_source():
+    """Current default source name, or None (helper then falls back to server default)."""
+    try:
+        r = subprocess.run(["pactl", "get-default-source"],
+                           capture_output=True, text=True, timeout=2)
+        name = r.stdout.strip()
+        return name or None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def write_json(path, obj):
+    """Atomic write: temp file + os.replace so a reader never sees a partial file."""
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w") as f:
+            json.dump(obj, f)
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
+def peak_level(buf):
+    """True sample peak of an s16le chunk -> 0..100. Empty/short -> 0."""
+    if not buf:
+        return 0
+    a = array.array("h")
+    try:
+        a.frombytes(buf)
+    except (ValueError, EOFError):
+        return 0
+    if not a:
+        return 0
+    pk = 0
+    for s in a:
+        v = -s if s < 0 else s
+        if v > pk:
+            pk = v
+    lvl = int(round(100.0 * pk / FULL_SCALE))
+    if lvl < 0:
+        lvl = 0
+    elif lvl > 100:
+        lvl = 100
+    return lvl
+
+
+def spawn_parec(source):
+    """Start a parec record stream on `source` (or server default if None)."""
+    cmd = ["parec", "--format=s16le", "--rate=%d" % RATE,
+           "--channels=%d" % CHANNELS, "--latency-msec=50"]
+    if source:
+        cmd.append("--device=%s" % source)
+    try:
+        return subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                               stderr=subprocess.DEVNULL, bufsize=CHUNK_BYTES)
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def main():
+    path = out_path()
+    while True:
+        source = default_source()
+        proc = spawn_parec(source)
+        if proc is None or proc.stdout is None:
+            # parec missing / failed to start — report silence, retry shortly.
+            write_json(path, {"level": 0, "ts": int(time.time()),
+                              "source": source or "", "live": False})
+            time.sleep(1.0)
+            continue
+
+        checked = 0
+        try:
+            while True:
+                buf = proc.stdout.read(CHUNK_BYTES)
+                if not buf:
+                    break  # parec exited (source vanished/switched) -> respawn
+                lvl = peak_level(buf)
+                write_json(path, {"level": lvl, "ts": int(time.time()),
+                                  "source": source or "", "live": True})
+                # every ~2 s re-check the default source; restart if it moved.
+                checked += 1
+                if checked >= 20:
+                    checked = 0
+                    if default_source() != source:
+                        break
+        except OSError:
+            pass
+        finally:
+            try:
+                proc.terminate()
+                proc.wait(timeout=1)
+            except (OSError, subprocess.SubprocessError):
+                try:
+                    proc.kill()
+                except OSError:
+                    pass
+        # brief pause before respawn so a persistently-broken source can't spin.
+        write_json(path, {"level": 0, "ts": int(time.time()),
+                          "source": source or "", "live": False})
+        time.sleep(0.3)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        sys.exit(0)

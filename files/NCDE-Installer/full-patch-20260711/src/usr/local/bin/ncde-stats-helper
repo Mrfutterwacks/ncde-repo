@@ -1,0 +1,218 @@
+#!/usr/bin/env python3
+# ncde-stats-helper — NCDE live stats bridge (userspace, no binary changes).
+#
+# WHY: LaPivot's WidgetData C++ object exposes top1name/top1cpu..top3name/top3cpu
+# (documented in MuchaStats.qml) but the stripped binary's readStats() only ever
+# reads /proc/stat and /proc/meminfo — it never iterates /proc/<pid>, so the
+# top-processes list is always empty (gap G3). There is also no backlight reader
+# anywhere (gap G5). The backlight is discovered per machine -- see pick_backlight().
+#
+# We cannot recompile the WM. So — exactly like the proven WeatherLive.qml
+# pattern — a small helper writes JSON to a well-known path and QML reads it via
+# a file:// XHR. This process touches ONLY /proc and /sys/class/backlight (reads)
+# and its own JSON output file. Nothing near ncde-portal / logind.
+#
+# Output path:  $XDG_RUNTIME_DIR/ncde-stats.json   (fallback ~/.cache/ncde/stats.json)
+# Cadence:      every ~2s (SLEEP), atomic replace so readers never see a half file.
+#
+# Every read is guarded: a missing/unreadable file skips that field, never crashes.
+
+import glob
+import json
+import os
+import sys
+import time
+
+SLEEP = 2.0
+CLK_TCK = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") else 100
+
+
+def out_path():
+    """Well-known output path: prefer the per-user runtime dir, else ~/.cache/ncde."""
+    rt = os.environ.get("XDG_RUNTIME_DIR")
+    if rt and os.path.isdir(rt):
+        return os.path.join(rt, "ncde-stats.json")
+    cache = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
+    d = os.path.join(cache, "ncde")
+    try:
+        os.makedirs(d, exist_ok=True)
+    except OSError:
+        pass
+    return os.path.join(d, "stats.json")
+
+
+def read_total_jiffies():
+    """Sum of all fields on the first line of /proc/stat = total system CPU time.
+    Returns int jiffies, or None if unreadable."""
+    try:
+        with open("/proc/stat", "r") as f:
+            line = f.readline()
+    except OSError:
+        return None
+    parts = line.split()
+    if not parts or parts[0] != "cpu":
+        return None
+    total = 0
+    for v in parts[1:]:
+        try:
+            total += int(v)
+        except ValueError:
+            pass
+    return total
+
+
+def read_proc_cpu():
+    """Map pid -> (comm, proc_jiffies=utime+stime) for every readable /proc/<pid>.
+    Processes that vanish mid-scan are simply skipped."""
+    out = {}
+    for entry in os.listdir("/proc"):
+        if not entry.isdigit():
+            continue
+        try:
+            with open("/proc/%s/stat" % entry, "r") as f:
+                line = f.read()
+        except (OSError, IOError):
+            continue  # process gone or unreadable -> skip
+        # comm is inside parens and may itself contain spaces/parens; split on
+        # the LAST ')' so field indexing after it is reliable.
+        lp = line.find("(")
+        rp = line.rfind(")")
+        if lp < 0 or rp < 0 or rp < lp:
+            continue
+        comm = line[lp + 1:rp]
+        rest = line[rp + 2:].split()
+        # After ')' index 0 = state (field 3). utime = field 14 -> index 11,
+        # stime = field 15 -> index 12.
+        if len(rest) < 13:
+            continue
+        try:
+            jiff = int(rest[11]) + int(rest[12])
+        except ValueError:
+            continue
+        out[entry] = (comm, jiff)
+    return out
+
+
+# Which backlight to drive when a laptop exposes more than one (2026-09-25): the
+# same order GNOME/systemd use -- firmware (ACPI) over platform (vendor driver)
+# over raw (GPU register) -- skipping any that report no range. Sorting by name
+# picked acpi_video0 over intel_backlight by accident of the alphabet, and the
+# widget then wrote to a different device than the one it showed.
+_BL_RANK = {"firmware": 0, "platform": 1, "raw": 2}
+
+
+def pick_backlight():
+    best = None
+    for d in sorted(glob.glob("/sys/class/backlight/*")):
+        try:
+            with open(os.path.join(d, "max_brightness"), "r") as f:
+                mx = int(f.read().strip())
+        except (OSError, IOError, ValueError):
+            continue
+        if mx <= 0:
+            continue
+        try:
+            with open(os.path.join(d, "type"), "r") as f:
+                rank = _BL_RANK.get(f.read().strip(), 3)
+        except (OSError, IOError):
+            rank = 3
+        if best is None or rank < best[0]:
+            best = (rank, d)
+    return best[1] if best else None
+
+
+def read_brightness():
+    """The laptop's backlight (pick_backlight). Returns {cur,max,pct,dev,writable}
+    or None (None = no backlight => desktop; caller omits the field entirely)."""
+    d = pick_backlight()
+    if d is None:
+        return None
+    try:
+        with open(os.path.join(d, "brightness"), "r") as f:
+            cur = int(f.read().strip())
+        with open(os.path.join(d, "max_brightness"), "r") as f:
+            mx = int(f.read().strip())
+    except (OSError, IOError, ValueError):
+        return None
+    pct = int(round(100.0 * cur / mx)) if mx > 0 else 0
+    return {"cur": cur, "max": mx, "pct": pct, "dev": d,
+            "writable": os.access(os.path.join(d, "brightness"), os.W_OK)}
+
+
+def top3(prev_procs, cur_procs, total_delta):
+    """Top 3 pids by CPU-jiffies delta between samples, as share of total system
+    CPU delta (0..100, where 100 = all cores fully busy on one process)."""
+    scored = []
+    for pid, (comm, jiff) in cur_procs.items():
+        pj = prev_procs.get(pid)
+        if pj is None:
+            continue  # new process this tick -> no delta yet
+        djiff = jiff - pj[1]
+        if djiff <= 0:
+            continue
+        if total_delta and total_delta > 0:
+            cpu = 100.0 * djiff / total_delta
+        else:
+            cpu = 0.0
+        scored.append((cpu, comm))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    result = []
+    for i in range(3):
+        if i < len(scored):
+            result.append({"name": scored[i][1], "cpu": round(scored[i][0], 1)})
+        else:
+            result.append({"name": "", "cpu": 0.0})  # fewer than 3 active procs
+    return result
+
+
+def write_json(path, obj):
+    """Atomic write: temp file + os.replace so a reader never sees a partial file."""
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w") as f:
+            json.dump(obj, f)
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
+def main():
+    path = out_path()
+    prev_procs = read_proc_cpu()
+    prev_total = read_total_jiffies()
+
+    while True:
+        time.sleep(SLEEP)
+        cur_procs = read_proc_cpu()
+        cur_total = read_total_jiffies()
+
+        total_delta = None
+        if prev_total is not None and cur_total is not None:
+            total_delta = cur_total - prev_total
+
+        tops = top3(prev_procs, cur_procs, total_delta)
+        data = {
+            "ts": int(time.time()),
+            "top1": tops[0],
+            "top2": tops[1],
+            "top3": tops[2],
+        }
+        b = read_brightness()
+        if b is not None:
+            data["brightness"] = b  # omitted entirely on a desktop (no backlight)
+
+        write_json(path, data)
+
+        prev_procs = cur_procs
+        if cur_total is not None:
+            prev_total = cur_total
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        sys.exit(0)

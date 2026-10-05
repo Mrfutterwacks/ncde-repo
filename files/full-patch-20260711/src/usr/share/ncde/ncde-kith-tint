@@ -1,0 +1,509 @@
+#!/usr/bin/env python3
+# ncde-kith-tint — keeps the Kith hardware cursor one size and one colour on every
+# surface of the session (2026-09-24).
+#
+# Why this exists: CursorManager (compiled into LaPivot, no source) paints Kith in a
+# fixed glass-blue and hands the shell's own window a size-32 arrow at startup, while
+# client apps load the Xcursor files at the Input-tab size. So the cursor changed
+# size crossing from the desktop into a window, and never followed Iris Chroma.
+#
+# What it does, with no LaPivot changes:
+#   1. Snapshots the pristine Kith theme LaPivot materializes each login
+#      ($XDG_RUNTIME_DIR/ncde-cursors/Kith) and rewrites those files tinted with the
+#      Iris accent — every app started afterwards loads the tinted set.
+#   2. Finds every live Kith cursor on the X server (all clients, LaPivot included):
+#      X-Resource lists the cursor IDs, a ~1 ms pointer grab displays each new one so
+#      XFixes can read it back, and an exact pixel match against the pristine theme
+#      names its shape. XFixesChangeCursor then rebinds that ID to the tinted image at
+#      the Input-tab size — the owner keeps using the same ID, so it sticks.
+#   3. Re-runs on every accent change (main.qml writes ~/.config/ncde/cursor-tint.json)
+#      and every cursor-size change (~/.config/ncde/input.json).
+#
+# Only exact Kith art is touched; foreign cursors (games, browsers' custom cursors)
+# are left alone. Glass panes take the accent hue at their own lightness (the woven
+# palette's "keep L, rotate hue" motif math); the gold leading and the ruby of
+# not-allowed/help keep their meaning and are not re-hued.
+#
+# Launched by main.qml via launcher.launchExec; one instance per session (flock);
+# exits with LaPivot.
+
+import ctypes, ctypes.util, fcntl, json, math, os, select, shutil, struct, sys, time
+
+RUN   = os.environ.get("XDG_RUNTIME_DIR") or "/run/user/%d" % os.getuid()
+THEME = os.path.join(RUN, "ncde-cursors", "Kith", "cursors")
+KEEP  = os.path.join(RUN, "ncde-cursors", ".kith-pristine")
+CONF  = os.path.expanduser("~/.config/ncde/")
+TINT_JSON  = CONF + "cursor-tint.json"
+INPUT_JSON = CONF + "input.json"
+
+def log(*a):
+    print("[kith-tint]", *a, file=sys.stderr, flush=True)
+
+# ── Xcursor files ───────────────────────────────────────────────────────────
+IMG = 0xfffd0002
+
+def read_xcursor(path):
+    """[(size, w, h, xhot, yhot, delay, pixels)] in file order."""
+    b = open(path, "rb").read()
+    if b[:4] != b"Xcur":
+        return []
+    ntoc = struct.unpack_from("<I", b, 12)[0]
+    out = []
+    for i in range(ntoc):
+        t, sub, pos = struct.unpack_from("<III", b, 16 + i * 12)
+        if t != IMG:
+            continue
+        w, h, xh, yh, dl = struct.unpack_from("<IIIII", b, pos + 16)
+        px = list(struct.unpack_from("<%dI" % (w * h), b, pos + 36))
+        out.append((sub, w, h, xh, yh, dl, px))
+    return out
+
+def write_xcursor(path, images):
+    ntoc = len(images)
+    pos = 16 + 12 * ntoc
+    toc, chunks = [], []
+    for sub, w, h, xh, yh, dl, px in images:
+        toc.append(struct.pack("<III", IMG, sub, pos))
+        c = struct.pack("<IIIIIIIII", 36, IMG, sub, 1, w, h, xh, yh, dl) + struct.pack("<%dI" % len(px), *px)
+        chunks.append(c)
+        pos += len(c)
+    tmp = path + ".kith-tint~"
+    with open(tmp, "wb") as f:
+        f.write(struct.pack("<4sIII", b"Xcur", 16, 0x10000, ntoc) + b"".join(toc) + b"".join(chunks))
+    os.replace(tmp, path)
+
+# ── colour: OKLab, premultiplied ARGB ───────────────────────────────────────
+def _lin(c):   return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+def _gam(c):   return 12.92 * c if c <= 0.0031308 else 1.055 * c ** (1 / 2.4) - 0.055
+def _cbrt(x):  return math.copysign(abs(x) ** (1 / 3), x)
+
+def to_lch(r, g, b):
+    r, g, b = _lin(r), _lin(g), _lin(b)
+    l = _cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b)
+    m = _cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b)
+    s = _cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b)
+    L = 0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s
+    A = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s
+    B = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s
+    return L, math.hypot(A, B), math.degrees(math.atan2(B, A)) % 360
+
+def from_lch(L, C, H):
+    A, B = C * math.cos(math.radians(H)), C * math.sin(math.radians(H))
+    l = (L + 0.3963377774 * A + 0.2158037573 * B) ** 3
+    m = (L - 0.1055613458 * A - 0.0638541728 * B) ** 3
+    s = (L - 0.0894841775 * A - 1.2914855480 * B) ** 3
+    return (_gam(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s),
+            _gam(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
+            _gam(-0.0041960771 * l - 0.7034186147 * m + 1.7076147010 * s))
+
+def in_gamut(rgb):
+    return all(-1e-4 <= c <= 1 + 1e-4 for c in rgb)
+
+def parse_hex(s):
+    s = (s or "").strip().lstrip("#")
+    if len(s) == 8:          # QML "#aarrggbb"
+        s = s[2:]
+    if len(s) != 6:
+        return None
+    try:
+        return tuple(int(s[i:i + 2], 16) / 255 for i in (0, 2, 4))
+    except ValueError:
+        return None
+
+# Kith glass is sky→cobalt (OKLCh hue ~215..275); gold leading sits ~70..90 and the
+# not-allowed ruby ~350..10 — outside the band, so they keep their colour.
+GLASS_LO, GLASS_HI, GLASS_EDGE = 200.0, 290.0, 15.0
+GLASS_REF_H, GLASS_REF_C = 245.0, 0.13
+
+def glass_weight(h, c):
+    if c < 0.012:            # neutral highlights/shadows: nothing to re-hue
+        return 0.0
+    if GLASS_LO <= h <= GLASS_HI:
+        return 1.0
+    d = GLASS_LO - h if h < GLASS_LO else h - GLASS_HI
+    return max(0.0, 1.0 - d / GLASS_EDGE)
+
+class Tinter:
+    def __init__(self, accent_rgb):
+        self.on = accent_rgb is not None
+        if self.on:
+            _, ac, ah = to_lch(*accent_rgb)
+            self.h = ah
+            # a greige accent gives smoky glass, a vivid one jewel glass — never grey-dead
+            self.k = min(1.4, max(0.35, ac / GLASS_REF_C))
+        self.memo = {}
+
+    def px(self, p):
+        if not self.on:
+            return p
+        a = p >> 24
+        if a == 0:
+            return p
+        hit = self.memo.get(p)
+        if hit is not None:
+            return hit
+        r, g, b = (((p >> s) & 255) / a for s in (16, 8, 0))    # un-premultiply
+        L, C, H = to_lch(min(r, 1), min(g, 1), min(b, 1))
+        w = glass_weight(H, C)
+        if w == 0.0:
+            self.memo[p] = p
+            return p
+        # keep L; move hue onto the accent (glass's own hue spread kept, halved);
+        # scale chroma by the accent's; shrink C until it fits sRGB
+        dh = ((H - GLASS_REF_H + 180) % 360) - 180
+        nh = (self.h + 0.5 * dh) % 360
+        nc = C * self.k
+        rgb = from_lch(L, nc, nh)
+        while not in_gamut(rgb) and nc > 0.002:
+            nc *= 0.92
+            rgb = from_lch(L, nc, nh)
+        if w < 1.0:          # feather the band edge against the untouched colours
+            rgb = tuple(w * t + (1 - w) * o for t, o in zip(rgb, (r, g, b)))
+        q = (a << 24)
+        for s, c in zip((16, 8, 0), rgb):
+            q |= int(round(min(1.0, max(0.0, c)) * a)) << s
+        self.memo[p] = q
+        return q
+
+    def image(self, px):
+        return [self.px(p) for p in px]
+
+# ── X11 via ctypes ──────────────────────────────────────────────────────────
+def _lib(name, fallback):
+    return ctypes.CDLL(ctypes.util.find_library(name) or fallback)
+
+X  = _lib("X11", "libX11.so.6")
+XF = _lib("Xfixes", "libXfixes.so.3")
+XR = _lib("XRes", "libXRes.so.1")
+XC = _lib("Xcursor", "libXcursor.so.1")
+vp, ul, ci, ui = ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_uint
+
+class XFixesCursorImage(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_short), ("y", ctypes.c_short), ("width", ctypes.c_ushort), ("height", ctypes.c_ushort),
+                ("xhot", ctypes.c_ushort), ("yhot", ctypes.c_ushort), ("serial", ul),
+                ("pixels", ctypes.POINTER(ul)), ("atom", ul), ("name", ctypes.c_char_p)]
+class ResSpec(ctypes.Structure):
+    _fields_ = [("resource", ul), ("type", ul)]
+class ResSize(ctypes.Structure):
+    _fields_ = [("spec", ResSpec), ("bytes", ctypes.c_long), ("ref_count", ctypes.c_long), ("use_count", ctypes.c_long)]
+class ResSizeValue(ctypes.Structure):
+    _fields_ = [("size", ResSize), ("num_cross_references", ctypes.c_long), ("cross_references", vp)]
+class ClientIdSpec(ctypes.Structure):
+    _fields_ = [("client", ul), ("mask", ui)]
+class ClientIdValue(ctypes.Structure):
+    _fields_ = [("spec", ClientIdSpec), ("length", ctypes.c_long), ("value", vp)]
+class XcursorImage(ctypes.Structure):
+    _fields_ = [("version", ui), ("size", ui), ("width", ui), ("height", ui),
+                ("xhot", ui), ("yhot", ui), ("delay", ui), ("pixels", ctypes.POINTER(ui))]
+
+X.XOpenDisplay.restype = vp;            X.XOpenDisplay.argtypes = [ctypes.c_char_p]
+X.XDefaultRootWindow.restype = ul;      X.XDefaultRootWindow.argtypes = [vp]
+X.XInternAtom.restype = ul;             X.XInternAtom.argtypes = [vp, ctypes.c_char_p, ci]
+X.XConnectionNumber.argtypes = [vp]
+X.XSync.argtypes = [vp, ci];            X.XFlush.argtypes = [vp]
+X.XPending.argtypes = [vp];             X.XNextEvent.argtypes = [vp, vp]
+X.XFree.argtypes = [vp];                X.XFreeCursor.argtypes = [vp, ul]
+X.XGrabPointer.argtypes = [vp, ul, ci, ui, ci, ci, ul, ul, ul]
+X.XUngrabPointer.argtypes = [vp, ul]
+XF.XFixesQueryExtension.argtypes = [vp, ctypes.POINTER(ci), ctypes.POINTER(ci)]
+XF.XFixesGetCursorImage.restype = ctypes.POINTER(XFixesCursorImage); XF.XFixesGetCursorImage.argtypes = [vp]
+XF.XFixesChangeCursor.argtypes = [vp, ul, ul]
+XF.XFixesSetCursorName.argtypes = [vp, ul, ctypes.c_char_p]
+XF.XFixesGetCursorName.restype = vp;    XF.XFixesGetCursorName.argtypes = [vp, ul, ctypes.POINTER(ul)]
+XF.XFixesSelectCursorInput.argtypes = [vp, ul, ul]
+XR.XResQueryResourceBytes.argtypes = [vp, ul, ci, ctypes.POINTER(ResSpec), ctypes.POINTER(ctypes.c_long),
+                                      ctypes.POINTER(ctypes.POINTER(ResSizeValue))]
+XR.XResQueryClientIds.argtypes = [vp, ctypes.c_long, ctypes.POINTER(ClientIdSpec), ctypes.POINTER(ctypes.c_long),
+                                  ctypes.POINTER(ctypes.POINTER(ClientIdValue))]
+XR.XResClientIdsDestroy.argtypes = [ctypes.c_long, vp]
+XR.XResResourceSizeValuesDestroy.argtypes = [ctypes.c_long, vp]
+XR.XResQueryVersion.argtypes = [vp, ctypes.POINTER(ci), ctypes.POINTER(ci)]
+XC.XcursorImageCreate.restype = ctypes.POINTER(XcursorImage); XC.XcursorImageCreate.argtypes = [ci, ci]
+XC.XcursorImageDestroy.argtypes = [ctypes.POINTER(XcursorImage)]
+XC.XcursorImageLoadCursor.restype = ul; XC.XcursorImageLoadCursor.argtypes = [vp, ctypes.POINTER(XcursorImage)]
+
+_xerrors = [0]
+@ctypes.CFUNCTYPE(ci, vp, vp)
+def _on_xerror(dpy, ev):
+    _xerrors[0] += 1          # BadCursor when a client frees a cursor mid-scan: expected, harmless
+    return 0
+
+class Server:
+    def __init__(self):
+        self.d = X.XOpenDisplay(None)
+        if not self.d:
+            raise SystemExit("no X display")
+        X.XSetErrorHandler(_on_xerror)
+        self.root = X.XDefaultRootWindow(self.d)
+        self.CURSOR = X.XInternAtom(self.d, b"CURSOR", 0)
+        maj, mnr = ci(1), ci(2)
+        XR.XResQueryVersion(self.d, ctypes.byref(maj), ctypes.byref(mnr))
+        ev, er = ci(), ci()
+        XF.XFixesQueryExtension(self.d, ctypes.byref(ev), ctypes.byref(er))
+        XF.XFixesSelectCursorInput(self.d, self.root, 1)     # DisplayCursorNotify: a scan cue
+        self.me = None
+
+    def fd(self):
+        return X.XConnectionNumber(self.d)
+
+    def drain(self):
+        buf = ctypes.create_string_buffer(256)
+        n = 0
+        while X.XPending(self.d):
+            X.XNextEvent(self.d, buf)
+            n += 1
+        return n
+
+    def cursors(self):
+        """Every CURSOR resource on the server, as a set of XIDs."""
+        spec = ResSpec(0, 0)
+        n = ctypes.c_long()
+        out = ctypes.POINTER(ResSizeValue)()
+        if XR.XResQueryResourceBytes(self.d, 0, 1, ctypes.byref(spec), ctypes.byref(n), ctypes.byref(out)):
+            return set()
+        ids = {out[i].size.spec.resource for i in range(n.value) if out[i].size.spec.type == self.CURSOR}
+        XR.XResResourceSizeValuesDestroy(n.value, out)
+        return ids
+
+    def name_atom(self, cur):
+        a = ul(0)
+        p = XF.XFixesGetCursorName(self.d, cur, ctypes.byref(a))
+        if p:
+            X.XFree(p)
+        return a.value
+
+    def capture(self, cur):
+        """Display `cur` for ~1 ms under a pointer grab and read it back. None if the
+        pointer is held by someone else (a drag in progress) or the cursor vanished."""
+        _xerrors[0] = 0
+        st = X.XGrabPointer(self.d, self.root, 0, 0, 1, 1, 0, cur, 0)
+        if st != 0 or _xerrors[0]:
+            if st == 0:
+                X.XUngrabPointer(self.d, 0)
+            X.XSync(self.d, 0)
+            return None
+        X.XSync(self.d, 0)
+        c = XF.XFixesGetCursorImage(self.d)
+        X.XUngrabPointer(self.d, 0)
+        X.XSync(self.d, 0)
+        if not c or _xerrors[0]:
+            return None
+        im = c.contents
+        key = (im.width, im.height, im.xhot, im.yhot,
+               tuple(im.pixels[i] & 0xffffffff for i in range(im.width * im.height)))
+        X.XFree(c)
+        return key
+
+    def rebind(self, cur, w, h, xh, yh, px, name):
+        """Point cursor ID `cur` (anyone's) at a fresh image; tag it so we know it's done."""
+        img = XC.XcursorImageCreate(w, h)
+        im = img.contents
+        im.xhot, im.yhot, im.delay = xh, yh, 0
+        arr = (ui * (w * h)).from_address(ctypes.addressof(im.pixels.contents))
+        arr[:] = px
+        src = XC.XcursorImageLoadCursor(self.d, img)
+        XC.XcursorImageDestroy(img)
+        _xerrors[0] = 0
+        XF.XFixesChangeCursor(self.d, src, cur)
+        XF.XFixesSetCursorName(self.d, cur, name.encode())
+        X.XFreeCursor(self.d, src)
+        X.XSync(self.d, 0)
+        return _xerrors[0] == 0
+
+    def tag(self, cur, name):
+        XF.XFixesSetCursorName(self.d, cur, name.encode())
+
+    def atom(self, name):
+        return X.XInternAtom(self.d, name.encode(), 0)
+
+# ── the job ─────────────────────────────────────────────────────────────────
+def lapivot_pid():
+    for p in os.listdir("/proc"):
+        if p.isdigit():
+            try:
+                # "LaPivot-L2" = the side-by-side test session (2026-10-01); it is LaPivot too
+                if open("/proc/%s/comm" % p).read().strip() in ("LaPivot", "LaPivot-L2"):
+                    return int(p)
+            except OSError:
+                pass
+    return None
+
+def read_json(path):
+    try:
+        with open(path) as f:
+            return json.loads(f.read().strip() or "{}")
+    except (OSError, ValueError):
+        return {}
+
+def mtime(path):
+    try:
+        return os.stat(path).st_mtime_ns
+    except OSError:
+        return 0
+
+class Kith:
+    def __init__(self, xs, session):
+        self.xs = xs
+        self.session = session
+        self.pristine = {}     # name -> [(size, w, h, xh, yh, delay, px)]
+        self.index = {}        # (w, h, xh, yh, pixels) -> name   (pristine AND our tinted output)
+        self.done = {}         # cursor XID -> tag atom we stamped on it
+        self.names = {}        # cursor XID -> Kith shape name (for restyles)
+        self.skip = {}         # foreign XID -> its name atom when we gave up on it
+        self.fails = {}        # XID -> failed captures in a row
+        self.accent = None
+        self.size = 32
+        self.tinter = Tinter(None)
+        self.foreign_atom = xs.atom("ncde:foreign")
+        self.snapshot()
+
+    def snapshot(self):
+        """Keep LaPivot's untinted theme for this login; re-take it if LaPivot restarted."""
+        stamp = os.path.join(KEEP, ".session")
+        try:
+            same = open(stamp).read().strip() == self.session
+        except OSError:
+            same = False
+        if not same:
+            shutil.rmtree(KEEP, ignore_errors=True)
+            os.makedirs(KEEP)
+            for n in os.listdir(THEME):
+                p = os.path.join(THEME, n)
+                if os.path.isfile(p) and not os.path.islink(p) and not n.endswith("~"):
+                    shutil.copy2(p, os.path.join(KEEP, n))
+            with open(stamp, "w") as f:
+                f.write(self.session)
+            log("pristine Kith snapshot taken for session", self.session)
+        for n in os.listdir(KEEP):
+            if n.startswith("."):
+                continue
+            imgs = read_xcursor(os.path.join(KEEP, n))
+            if imgs:
+                self.pristine[n] = imgs
+                for sub, w, h, xh, yh, dl, px in imgs:
+                    self.index[(w, h, xh, yh, tuple(px))] = n
+
+    def pick(self, name):
+        imgs = self.pristine[name]
+        return min(imgs, key=lambda im: (abs(im[0] - self.size), -im[0]))
+
+    def read_settings(self):
+        t = read_json(TINT_JSON)
+        acc = t.get("accent") if t.get("tint", True) else None
+        rgb = parse_hex(acc) if isinstance(acc, str) else None
+        sz = read_json(INPUT_JSON).get("cursorSize", 32)
+        try:
+            sz = int(sz)
+        except (TypeError, ValueError):
+            sz = 32
+        changed = (rgb != self.accent) or (sz != self.size)
+        self.accent, self.size = rgb, sz
+        if changed:
+            self.tinter = Tinter(rgb)
+        return changed
+
+    def write_theme(self):
+        t0 = time.time()
+        for n, imgs in self.pristine.items():
+            out = [(s, w, h, xh, yh, dl, self.tinter.image(px)) for s, w, h, xh, yh, dl, px in imgs]
+            write_xcursor(os.path.join(THEME, n), out)
+            for s, w, h, xh, yh, dl, px in out:          # apps load these: recognise them too
+                self.index.setdefault((w, h, xh, yh, tuple(px)), n)
+        log("theme files rewritten (accent %s) in %.1fs" % (self.accent_hex(), time.time() - t0))
+
+    def accent_hex(self):
+        return "#%02x%02x%02x" % tuple(round(c * 255) for c in self.accent) if self.accent else "none"
+
+    def apply(self, cur, name):
+        s, w, h, xh, yh, dl, px = self.pick(name)
+        tag = "kith:%s@%d:%s" % (name, s, self.accent_hex())
+        if self.xs.rebind(cur, w, h, xh, yh, self.tinter.image(px), tag):
+            self.done[cur] = self.xs.atom(tag)
+            self.names[cur] = name
+
+    def scan(self, restyle=False):
+        live = self.xs.cursors()
+        for gone in [c for c in self.done if c not in live]:
+            del self.done[gone], self.names[gone]
+        # 2026-09-24 loop fix: every capture() is a pointer grab, and each grab is
+        # itself a DisplayCursorNotify cue. A foreign cursor that already carried a
+        # name (libXcursor names every theme cursor it loads, e.g. Adwaita
+        # "crosshair") was never tagged, so it fell out of skip on the next scan and
+        # was grabbed again ~1x/s forever -- clicks landing in a grab were lost
+        # (dock/power button dead on/off). Skip now remembers the name it had, and a
+        # cursor that won't capture is given up on after 3 tries.
+        self.skip = {c: a for c, a in self.skip.items() if c in live}
+        self.fails = {c: n for c, n in self.fails.items() if c in live}
+        if restyle:
+            for cur in list(self.done):
+                self.apply(cur, self.names[cur])
+        for cur in live:
+            if cur in self.skip:
+                if self.xs.name_atom(cur) == self.skip[cur]:
+                    continue
+                del self.skip[cur]            # ID was freed and reused — look again
+            if cur in self.done:
+                if self.xs.name_atom(cur) == self.done[cur]:
+                    continue
+                del self.done[cur], self.names[cur]    # reused ID
+            img = self.xs.capture(cur)
+            if img is None:
+                self.fails[cur] = self.fails.get(cur, 0) + 1
+                if self.fails[cur] >= 3:      # busy/unreadable 3x: stop grabbing for it
+                    self.skip[cur] = self.xs.name_atom(cur)
+                continue                      # busy pointer / vanished: next cue retries
+            self.fails.pop(cur, None)
+            name = self.index.get(img)
+            if name is None:
+                a = self.xs.name_atom(cur)
+                if a == 0:
+                    self.xs.tag(cur, "ncde:foreign")
+                    a = self.foreign_atom
+                self.skip[cur] = a
+                continue
+            self.apply(cur, name)
+
+def main():
+    os.makedirs(os.path.dirname(KEEP), exist_ok=True)
+    lock = open(os.path.join(RUN, "ncde-cursors", ".kith-tint.lock"), "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return 0                               # already running this session
+    pid = lapivot_pid()
+    if not pid or not os.path.isdir(THEME):
+        log("no LaPivot / no Kith theme — nothing to do")
+        return 0
+    session = "%d:%s" % (pid, open("/proc/%d/stat" % pid).read().split()[21])
+    xs = Server()
+    k = Kith(xs, session)
+    k.read_settings()
+    k.write_theme()
+    k.scan()
+    log("up: %d Kith cursors live-rebound at size %d, accent %s" % (len(k.done), k.size, k.accent_hex()))
+
+    seen = (mtime(TINT_JSON), mtime(INPUT_JSON))
+    last_scan, dirty = time.time(), False
+    while True:
+        r, _, _ = select.select([xs.fd()], [], [], 1.0)
+        if xs.drain() or r:
+            dirty = True
+        if not os.path.exists("/proc/%d" % pid):
+            log("LaPivot gone — exiting")
+            return 0
+        now = (mtime(TINT_JSON), mtime(INPUT_JSON))
+        if now != seen:
+            seen = now
+            if k.read_settings():
+                k.write_theme()
+                k.scan(restyle=True)
+                log("restyled: size %d, accent %s" % (k.size, k.accent_hex()))
+                continue
+        # a new cursor only matters once something shows it; scan at most 4×/s
+        if dirty and time.time() - last_scan > 0.25:
+            k.scan()
+            xs.drain()                        # our own grabs' cursor cues are not news
+            dirty, last_scan = False, time.time()
+
+if __name__ == "__main__":
+    sys.exit(main() or 0)

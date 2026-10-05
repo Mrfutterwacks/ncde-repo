@@ -1,0 +1,427 @@
+// BottomPanel.qml — NCDE Bottom Panel
+// CDE Front Panel DNA: icon launcher buttons, clock, workspace switcher
+// Height: 28px to match the top panel; icon-only launchers (labels dropped to fit)
+
+import QtQuick 2.15
+import QtQuick.Window 2.15
+import QtQuick.Controls 2.15
+
+Item {
+    id: bottomPanel
+    anchors.bottom: parent.bottom; anchors.bottomMargin: 12
+    anchors.left: parent.left; anchors.leftMargin: 6
+    anchors.right: parent.right; anchors.rightMargin: 6
+    height: 28
+    z: 500
+
+    // Wallpaper reference for glass effect
+    property Item wallpaperSource: null
+    property Item menuLayer: null
+    property alias ledger: ledger
+
+    property var _surfaceGlass: null
+    Component.onCompleted: {
+        _surfaceGlass = typeof ncde.surfaceGlass === "function" ? ncde.surfaceGlass("bottomPanel") : null
+    }
+    Connections {
+        target: ncde
+        function onThemeChanged() {
+            bottomPanel._surfaceGlass = typeof ncde.surfaceGlass === "function" ? ncde.surfaceGlass("bottomPanel") : null
+        }
+    }
+
+    // ── Intellihide ───────────────────────────────────────
+    property real targetY: intellihide.btmRevealed ? 0 : height + 28
+    Behavior on targetY {
+        NumberAnimation { duration: 400; easing.type: Easing.OutExpo }
+    }
+    transform: Translate { y: bottomPanel.targetY }
+
+    HoverHandler {
+        onHoveredChanged: {
+            intellihide.btmHovered = hovered
+            if (hovered) intellihide.revealAll()
+            else intellihide.scheduleHide()
+        }
+    }
+
+    // ── Aero glass pill — via shared NCDEGlassSurface ──────────────────────
+    NCDEGlassSurface {
+        anchors.fill: parent
+        backgroundSource: bottomPanel.wallpaperSource
+        specularInset: 0.0
+        revealPulse: intellihide.btmRevealed
+        glintPulse: intellihide.glintPulse
+        tint: {
+            if (!ncde.presetActive) {
+                var g = bottomPanel._surfaceGlass
+                if (g && g["tint"] !== undefined) { var c = Qt.color(g["tint"]); return Qt.rgba(c.r, c.g, c.b, g["shine"] !== undefined ? g["shine"] * 0.36 : 0.18) }
+            }
+            return Qt.rgba(ncde.accent.r, ncde.accent.g, ncde.accent.b, 0.18)
+        }
+        glowA: bottomPanel._surfaceGlass && bottomPanel._surfaceGlass["glow"] !== undefined ? bottomPanel._surfaceGlass["glow"] : 0.70
+        edge: {
+            if (!ncde.presetActive) {
+                var g = bottomPanel._surfaceGlass
+                if (g && g["border"] !== undefined) { var c = Qt.color(g["border"]); return Qt.rgba(c.r, c.g, c.b, 0.85) }
+            }
+            return Qt.rgba(ncde.glow.r, ncde.glow.g, ncde.glow.b, 0.85)
+        }
+        glowRim:  !ncde.presetActive && bottomPanel._surfaceGlass && bottomPanel._surfaceGlass["glowColor"] !== undefined ? Qt.color(bottomPanel._surfaceGlass["glowColor"]) : ncde.glow
+        glowHalo: !ncde.presetActive && bottomPanel._surfaceGlass && bottomPanel._surfaceGlass["glowColor"] !== undefined ? Qt.color(bottomPanel._surfaceGlass["glowColor"]) : ncde.glow
+    }
+    // ── Top edge glow — mirrors top panel underglow ───────────
+    Rectangle {
+        anchors.bottom: parent.top
+        anchors.left: parent.left
+        anchors.right: parent.right
+        height: 14; z: -1
+        gradient: Gradient {
+            orientation: Gradient.Vertical
+            GradientStop { position: 0.0; color: Qt.rgba(ncde.glow.r,ncde.glow.g,ncde.glow.b,0.00) }
+            GradientStop { position: 1.0; color: Qt.rgba(ncde.glow.r,ncde.glow.g,ncde.glow.b,0.25) }
+        }
+    }
+
+    // ── Leap Frog Ledger window ────────────────────────────────
+    Window {
+        id: ledgerWindow
+        // Real bug fixed 2026-07-04: missing Qt.WindowStaysOnTopHint. This window
+        // bypasses LaPivot's own WM (BypassWindowManagerHint), so nothing else raises
+        // it above other windows; every managed app opens maximized by design, so
+        // without this hint the Ledger opened (visible=true) but sat behind whatever
+        // else was full-screen. Matches the proven working pattern already used by
+        // main.qml's exposeWindow for the same bypass-WM situation.
+        flags: Qt.FramelessWindowHint | Qt.BypassWindowManagerHint | Qt.WindowStaysOnTopHint
+        width: 860; height: 620
+        x: (Screen.width  - width)  / 2
+        y: (Screen.height - height) / 2
+        color: "transparent"
+        visible: false
+
+        LeapFrogLedger { id: ledger; anchors.fill: parent; onCloseRequested: ledgerWindow.visible = false }
+    }
+
+
+    Row {
+        anchors.fill: parent
+        anchors.leftMargin: 6; anchors.rightMargin: 6
+        spacing: 0
+
+        // ── LEFT: CDE Front Panel labeled launchers ────────────
+        Row {
+            id: launcherStrip
+            spacing: 2
+            anchors.verticalCenter: parent.verticalCenter
+
+            Repeater {
+                model: [
+                    { exec: "/usr/local/bin/orchidee", name: "Orchidée",     tip: "Orchidée"    },
+                    { exec: "magpie-talker",           name: "Magpie",       tip: "Magpie"      },
+                    { exec: "verve-text",              name: "Verve",        tip: "Verve"       },
+                    { exec: "abacus",                  name: "Abacus",       tip: "Abacus"      },
+                    { exec: "verdantfolio",            name: "Writer",       tip: "Verdant"     },
+                ]
+
+                // CDE-style launcher button (icon-only)
+                Item {
+                    id: fpBtn
+                    width: 30; height: 24
+                    anchors.verticalCenter: parent.verticalCenter
+                    property bool pressed: false
+                    property bool hovered: false
+
+                    Rectangle {
+                        anchors.fill: parent; anchors.margins: 1
+                        radius: 3
+                        color: fpBtn.pressed
+                            ? Qt.rgba(0,0,0, 0.3)
+                            : fpBtn.hovered
+                            ? Qt.rgba(ncde.accent.r, ncde.accent.g, ncde.accent.b, 0.12)
+                            : Qt.rgba(1,1,1, 0.04)
+                        border.color: fpBtn.hovered
+                            ? Qt.rgba(ncde.accent.r, ncde.accent.g, ncde.accent.b, 0.5)
+                            : Qt.rgba(1,1,1,0.08)
+                        border.width: 1
+                        Behavior on color { ColorAnimation { duration: 80 } }
+
+                        // Motif top highlight
+                        Rectangle {
+                            anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right
+                            height: 1; color: Qt.rgba(1,1,1, fpBtn.pressed ? 0.05 : 0.15); radius: 3
+                        }
+
+                        // Icon-only launcher (CDE FP label dropped to fit the 28px panel)
+                        MuchaIcon {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            size: 18
+                            appName: modelData.name
+                            accentColor: ncde.accent
+                            glowColor:   ncde.glow
+                            y: parent.height / 2 - size / 2 + (fpBtn.pressed ? 1 : 0)
+                            Behavior on y { NumberAnimation { duration: 60; easing.type: Easing.OutExpo } }
+                        }
+                    }
+
+                    HoverHandler {
+                        onHoveredChanged: {
+                            fpBtn.hovered = hovered
+                            if (hovered) fpTipDelay.restart()
+                            else fpTipDelay.stop()
+                        }
+                    }
+                    TapHandler {
+                        onPressedChanged: fpBtn.pressed = pressed
+                        onTapped: launcher.launchExec(modelData.exec)
+                    }
+
+                    // Tooltip cartouche (2026-07-09) — surfaces the launcher model's
+                    // tip field, which shipped in the model but was never rendered.
+                    Timer { id: fpTipDelay; interval: 450 }
+                    Rectangle {
+                        visible: fpBtn.hovered && !fpBtn.pressed && !fpTipDelay.running
+                        y: -(height + 8)
+                        x: Math.max((fpBtn.width - width) / 2, -(fpBtn.x + 4))
+                        width: fpTipText.implicitWidth + 16
+                        height: fpTipText.implicitHeight + 8
+                        radius: 6
+                        z: 10
+                        color: Qt.rgba(ncde.panelBg.r, ncde.panelBg.g, ncde.panelBg.b, 0.94)
+                        border.width: 1
+                        border.color: Qt.rgba(ncde.gilt3.r, ncde.gilt3.g, ncde.gilt3.b, 0.9)
+                        Text {
+                            id: fpTipText
+                            anchors.centerIn: parent
+                            text: modelData.tip
+                            color: ncde.panelText
+                            font.family: ncde.titleFont
+                            font.pixelSize: SetTheme.sm
+                        }
+                    }
+                }
+            }
+
+            // Separator
+            Rectangle {
+                width: 1; height: 16
+                anchors.verticalCenter: parent.verticalCenter
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: "transparent" }
+                    GradientStop { position: 0.5; color: Qt.rgba(ncde.glow.r,ncde.glow.g,ncde.glow.b,0.35) }
+                    GradientStop { position: 1.0; color: "transparent" }
+                }
+            }
+        }
+
+        // ── CENTER: Window task list ───────────────────────────
+        Item {
+            id: taskArea
+            height: parent.height
+            width: bottomPanel.width
+                   - launcherStrip.width
+                   - menuStrip.width
+                   - minimizedStrip.width
+                   - wsRow.width
+                   - 20
+
+            Row {
+                anchors.fill: parent
+                anchors.leftMargin: 6; anchors.rightMargin: 6
+                spacing: 2
+
+                Repeater {
+                    id: taskRepeater
+                    model: windowMgr
+
+                    Rectangle {
+                        visible: model.minimized !== true && width > 20
+                        width: {
+                            var active = windowMgr.count
+                            var avail = taskArea.width - 8
+                            return active > 0 ? Math.min(180, avail / active - 3) : 0
+                        }
+                        height: 20
+                        radius: 3
+                        anchors.verticalCenter: parent.verticalCenter
+
+                        color: windowMgr.activeIndex === index
+                            ? Qt.rgba(ncde.accent.r, ncde.accent.g, ncde.accent.b, 0.18)
+                            : Qt.rgba(1,1,1,0.04)
+                        border.color: windowMgr.activeIndex === index
+                            ? Qt.rgba(ncde.accent.r, ncde.accent.g, ncde.accent.b, 0.7)
+                            : Qt.rgba(1,1,1,0.10)
+                        border.width: 1
+
+                        Behavior on color { ColorAnimation { duration: 120 } }
+
+                        // Active top line
+                        Rectangle {
+                            visible: windowMgr.activeIndex === index
+                            anchors.top: parent.top
+                            anchors.left: parent.left; anchors.right: parent.right
+                            height: 2; color: ncde.accent; radius: 1
+                        }
+
+                        Text {
+                            anchors.left: parent.left; anchors.leftMargin: 8
+                            anchors.right: parent.right; anchors.rightMargin: 6
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: model.title || "Window"
+                            color: windowMgr.activeIndex === index ? ncde.accent : ncde.gilt4
+                            font.pixelSize: theme.fontSmall; font.family: theme.fontFamily
+                            elide: Text.ElideRight
+                        }
+
+                        TapHandler {
+                            onTapped: {
+                                if (windowMgr.activeIndex === index) {
+                                    windowMgr.minimizeWindow(model.winId)
+                                } else {
+                                    if (model.minimized) windowMgr.unminimizeWindow(model.winId)
+                                    else windowMgr.activateWindow(model.winId)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── MINIMIZED PILLS ────────────────────────────────────
+        Row {
+            id: minimizedStrip
+            spacing: 3
+            anchors.verticalCenter: parent.verticalCenter
+
+            visible: windowMgr.count > 0
+
+            Rectangle {
+                visible: minimizedStrip.visible
+                width: 1; height: 16
+                anchors.verticalCenter: parent.verticalCenter
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: "transparent" }
+                    GradientStop { position: 0.5; color: Qt.rgba(ncde.glow.r,ncde.glow.g,ncde.glow.b,0.35) }
+                    GradientStop { position: 1.0; color: "transparent" }
+                }
+            }
+
+            Repeater {
+                model: windowMgr
+                Rectangle {
+                    visible: model.minimized === true
+                    width: visible ? 30 : 0; height: 22
+                    radius: 11
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: Qt.rgba(ncde.glow.r, ncde.glow.g, ncde.glow.b, 0.1)
+                    border.color: Qt.rgba(ncde.glow.r, ncde.glow.g, ncde.glow.b, minP.val)
+                    border.width: 1
+
+                    Item { id: minP; property real val: 0.3
+                        SequentialAnimation on val {
+                            running: model.minimized === true && !animPolicy.screenIdle; loops: Animation.Infinite
+                            NumberAnimation { to: 0.8; duration: 1200; easing.type: Easing.InOutSine }
+                            NumberAnimation { to: 0.2; duration: 1200; easing.type: Easing.InOutSine }
+                        }
+                    }
+
+                    MuchaIcon {
+                        anchors.centerIn: parent
+                        size: 14
+                        appName: model.appId || model.title.split(" ")[0] || "?"
+                        accentColor: ncde.accent
+                        glowColor:   ncde.glow
+                    }
+
+                    TapHandler {
+                        onTapped: {
+                            windowMgr.unminimizeWindow(model.winId)
+                        }
+                    }
+                    HoverHandler { id: mh }
+                }
+            }
+
+            Rectangle {
+                visible: minimizedStrip.visible
+                width: 1; height: 16
+                anchors.verticalCenter: parent.verticalCenter
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: "transparent" }
+                    GradientStop { position: 0.5; color: Qt.rgba(ncde.glow.r,ncde.glow.g,ncde.glow.b,0.35) }
+                    GradientStop { position: 1.0; color: "transparent" }
+                }
+            }
+        }
+
+        // ── LEAP FROG LEDGER menu strip ────────────────────────
+        GliaLeapFrogBar {
+            id: menuStrip
+            anchors.verticalCenter: parent.verticalCenter
+            height: parent.height
+            app: ledger
+            pond: pond
+            menuLayer: bottomPanel.menuLayer
+        }
+
+        // ── WORKSPACE SWITCHER — CDE FP centerpiece ───────────
+        Row {
+            id: wsRow
+            spacing: 3
+            anchors.verticalCenter: parent.verticalCenter
+
+            Repeater {
+                model: ncdeWorkspace.names
+
+                Rectangle {
+                    width: 28; height: 22; radius: 3
+                    anchors.verticalCenter: parent.verticalCenter
+
+                    color: ncdeWorkspace.current === index
+                        ? Qt.rgba(ncde.accent.r, ncde.accent.g, ncde.accent.b, 0.25)
+                        : Qt.rgba(1,1,1,0.04)
+                    border.color: ncdeWorkspace.current === index
+                        ? Qt.rgba(ncde.accent.r, ncde.accent.g, ncde.accent.b, 0.7)
+                        : Qt.rgba(1,1,1,0.10)
+                    border.width: 1
+
+                    Behavior on color { ColorAnimation { duration: 120 } }
+
+                    // Active top line
+                    Rectangle {
+                        visible: ncdeWorkspace.current === index
+                        anchors.top: parent.top
+                        anchors.left: parent.left; anchors.right: parent.right
+                        height: 2; color: ncde.accent; radius: 1
+                    }
+
+                    Column {
+                        anchors.centerIn: parent
+                        spacing: 1
+                        Text {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: index + 1
+                            color: ncdeWorkspace.current === index ? ncde.accent : ncde.gilt4
+                            font.pixelSize: theme.fontSmall; font.bold: ncdeWorkspace.current === index
+                            font.family: "TerminalVector"
+                        }
+                        Text {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: ["One","Two","Three","Four"][index] || ""
+                            color: ncdeWorkspace.current === index
+                                ? Qt.rgba(ncde.accent.r, ncde.accent.g, ncde.accent.b, 0.7)
+                                : Qt.rgba(ncde.gilt4.r, ncde.gilt4.g, ncde.gilt4.b, 0.5)
+                            font.pixelSize: theme.fontSmall; font.family: theme.fontFamily
+                        }
+                    }
+
+                    // ncdeWorkspace.activate() now sends a real _NET_CURRENT_DESKTOP EWMH
+                    // ClientMessage (NCDEWorkspace.h), which NCDEWindowManager's own
+                    // switchDesktop()/XCB_CLIENT_MESSAGE handler acts on directly — no more
+                    // external wmctrl shell-out. index is 0-based, matching EWMH's own convention.
+                    TapHandler { onTapped: ncdeWorkspace.activate(index) }
+                }
+            }
+        }
+    }
+}

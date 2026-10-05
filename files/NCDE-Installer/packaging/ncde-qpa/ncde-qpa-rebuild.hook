@@ -1,0 +1,11 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = qt6-base
+Target = ncde-qpa
+
+[Action]
+Description = Rebuilding NCDE's Qt theme for the installed Qt...
+When = PostTransaction
+Exec = /usr/lib/ncde-qpa/ncde-qpa-rebuild

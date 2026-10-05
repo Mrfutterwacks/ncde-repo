@@ -1,0 +1,41 @@
+import QtQuick 2.15
+import QtQuick.Controls 2.15
+import QtQuick.Effects 6.5
+
+Rectangle {
+    id: appMenu; visible: false; x: 74; y: 35; width: 520; height: 480; z: 600
+    color: ncde.popupBg; border.color: ncde.border; border.width: 1; radius: 8
+    property string selectedCategory: "All"; property string searchText: ""
+    ListModel { id: appListModel }
+    ListModel { id: categoryListModel }
+    function refreshApps() { var apps=appMenuModel.getApps(appMenu.selectedCategory,appMenu.searchText); appListModel.clear(); for(var i=0;i<apps.length;i++) appListModel.append(apps[i]) }
+    function refreshCategories() { var cats=appMenuModel.getCategories(); categoryListModel.clear(); for(var i=0;i<cats.length;i++) categoryListModel.append({name:cats[i]}) }
+    onVisibleChanged: { if(visible){refreshCategories();selectedCategory="All";searchText="";searchField.text="";refreshApps();searchField.forceActiveFocus()} }
+    Rectangle { id:searchBar; anchors.top:parent.top;anchors.topMargin:8;anchors.left:parent.left;anchors.right:parent.right;anchors.leftMargin:8;anchors.rightMargin:8;height:30;radius:4;color:Qt.rgba(ncde.panelBg.r,ncde.panelBg.g,ncde.panelBg.b,0.9);border.color:ncde.accentMuted;border.width:1
+        Text{anchors.left:parent.left;anchors.leftMargin:8;anchors.verticalCenter:parent.verticalCenter;text:"🔍";font.pixelSize:theme.fontMedium;visible:searchField.text==="";color:WallInk.inked(ncde.accentMuted)}
+        TextInput{id:searchField;anchors.fill:parent;anchors.leftMargin:28;anchors.rightMargin:8;anchors.topMargin:4;anchors.bottomMargin:4;color:WallInk.inked(ncde.accent);font.pixelSize:theme.fontSmall;onTextChanged:{appMenu.searchText=text;if(text!=="")appMenu.selectedCategory="All";appMenu.refreshApps()}} }
+    Row { anchors.top:searchBar.bottom;anchors.topMargin:6;anchors.left:parent.left;anchors.right:parent.right;anchors.bottom:parent.bottom;anchors.leftMargin:8;anchors.rightMargin:8;anchors.bottomMargin:8;spacing:6
+        Rectangle { width:140;height:parent.height;color:ncde.popupBg;border.color:ncde.accentMuted;border.width:1;radius:3
+            ListView { anchors.fill:parent;anchors.margins:4;clip:true;model:categoryListModel
+                delegate:Rectangle{width:parent.width;height:28;radius:3;color:appMenu.selectedCategory===model.name?Qt.rgba(ncde.accent.r,ncde.accent.g,ncde.accent.b,0.2):"transparent"
+                    Text{anchors.left:parent.left;anchors.leftMargin:8;anchors.verticalCenter:parent.verticalCenter;text:model.name;color:WallInk.inked(ncde.accent);font.pixelSize:theme.fontSmall}
+                    TapHandler{onTapped:{appMenu.selectedCategory=model.name;searchField.text="";appMenu.searchText="";appMenu.refreshApps()}}} } }
+        Rectangle { width:parent.width-140-6;height:parent.height;color:ncde.popupBg;border.color:ncde.accentMuted;border.width:1;radius:3
+            ListView { anchors.fill:parent;anchors.margins:4;clip:true;model:appListModel;spacing:2
+                delegate:Rectangle{width:parent.width;height:30;radius:3;color:"transparent"
+                    Row{anchors.left:parent.left;anchors.leftMargin:8;anchors.verticalCenter:parent.verticalCenter;spacing:8
+                        Image{width:18;height:18;anchors.verticalCenter:parent.verticalCenter;source:model.icon!==""?"image://icon/"+model.icon:"";fillMode:Image.PreserveAspectFit;smooth:true;visible:model.icon!=="";onStatusChanged:if(status===Image.Error)visible=false}
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter; text: model.name
+                            color: WallInk.inked(aH.hovered ? ncde.accent : theme.textColor)
+                            font.pixelSize: theme.fontSmall; font.family: theme.fontFamily; font.weight: settings.fontWeight; font.italic: settings.fontItalic; font.letterSpacing: theme.letterSpacing; elide: Text.ElideRight; width: parent.width - 40
+                            style: theme.textStyle; styleColor: theme.textStyleColor
+                            layer.enabled: theme.textShadowEnabled
+                            layer.effect: MultiEffect { shadowEnabled: true; shadowColor: theme.textShadowColor
+                                shadowBlur: theme.textShadowRadius / 32.0
+                                shadowHorizontalOffset: theme.textShadowOffsetX; shadowVerticalOffset: theme.textShadowOffsetY }
+                            Behavior on color { ColorAnimation { duration: 80 } }
+                        }}
+                    HoverHandler{id:aH;onHoveredChanged:parent.color=hovered?Qt.rgba(ncde.accent.r,ncde.accent.g,ncde.accent.b,0.10):"transparent"}
+                    TapHandler{onTapped:{launcher.launchExec(model.exec);appMenu.visible=false}}} } } }
+}

@@ -1,0 +1,9 @@
+[Unit]
+Description=Leap Frog Ledger — reminder check
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/cal-reminders
+# Needs the user's session bus for notify-send:
+Environment=DISPLAY=:0

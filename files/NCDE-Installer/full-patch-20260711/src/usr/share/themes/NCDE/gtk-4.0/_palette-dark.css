@@ -1,0 +1,23 @@
+/* NCDE GTK4 — dark grounds. DEFINES ONLY (no Adwaita import, no rules — those
+   corrupt libadwaita). Engine-rewritten LIVE from tokens. gtk.md §5.2. */
+@define-color theme_bg_color         #263033;  /* ← panelBg */
+@define-color theme_fg_color         #E6F1F2;  /* ← ink     */
+@define-color theme_base_color       #1E2527;  /* ← surface */
+@define-color theme_text_color       #E6F1F2;  /* ← ink     */
+@define-color insensitive_bg_color   #263033;  /* ← panelBg */
+@define-color insensitive_fg_color   #5A6670;  /* ← inkSoft */
+@define-color borders                #5A6670;  /* ← border  */
+@define-color theme_selected_fg_color #FFFFFF;
+
+/* libadwaita compat named colors (consumed by adw apps that read them) */
+@define-color window_bg_color        #263033;
+@define-color window_fg_color        #E6F1F2;
+@define-color view_bg_color          #1E2527;
+@define-color view_fg_color          #E6F1F2;
+@define-color headerbar_bg_color     #222B2E;
+@define-color headerbar_fg_color     #E6F1F2;
+@define-color card_bg_color          #1E2527;
+@define-color card_fg_color          #E6F1F2;
+@define-color popover_bg_color       #263033;
+@define-color popover_fg_color       #E6F1F2;
+/* theme_selected_bg_color + ncde_accent + accent_* come from _accent.css. */

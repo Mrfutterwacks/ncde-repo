@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# ============================================================
+# ncde-installer-session  (SPLASH-ON-BOOT variant)
+# Install to: /usr/local/bin/ncde-installer-session  (chmod +x)
+#
+# Difference from the known-good launcher: instead of passing the
+# binary to startx directly, it lets startx use /root/.xinitrc +
+# /root/.xserverrc. That is what enables `-background none` (no black
+# flash) and the root tint — WITHOUT the fragile inline wrapper that
+# caused the boot loop. The binary is still exec'd (as .xinitrc's last
+# line), so the session can't respawn-loop.
+# ============================================================
+set -e
+
+export NCDE_LIVE=1                       # real install; comment out to dry-run
+export WEBKIT_DISABLE_DMABUF_RENDERER=1  # stops the webkit web-process crash loop
+export WEBKIT_DISABLE_COMPOSITING_MODE=1
+export GDK_BACKEND=x11
+# export LIBGL_ALWAYS_SOFTWARE=1         # uncomment only on GPUs with no working GL
+
+BIN=/usr/local/bin/ncde-tauri-installer
+if [ ! -x "$BIN" ]; then
+  echo "FATAL: $BIN not found or not executable." >&2
+  exec bash
+fi
+
+if [ -z "$DISPLAY" ]; then
+  # No client arg → startx reads /root/.xinitrc (which exec's $BIN) and
+  # /root/.xserverrc (which adds -background none). No -nocursor: this is a
+  # click-driven installer, the mouse pointer must be visible.
+  exec startx
+else
+  command -v xsetroot >/dev/null 2>&1 && xsetroot -solid '#020608'
+  exec "$BIN"
+fi

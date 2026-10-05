@@ -1,0 +1,5 @@
+# WidgetData additions beyond the oracle
+# 1. Settings-aware clock formatting (hourFormat: "auto"/"12"/"24", showSeconds).
+    Q_PROPERTY(QString timeSecond READ ? NOTIFY clockChanged)
+    Q_INVOKABLE public void setSettings(Settings* settings);
+    Q_INVOKABLE public void refreshWeather();

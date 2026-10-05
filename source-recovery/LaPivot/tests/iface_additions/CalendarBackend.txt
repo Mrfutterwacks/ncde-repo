@@ -1,0 +1,29 @@
+# CalendarBackend additions — measured defects fixed 2026-10-01.
+# C2: save() was NOT atomic (truncated file mid-write / concurrent cal-reminders read).
+#     Fixed: write .tmp in same dir, fsync, rename() — POSIX atomic replace.
+# C3: load() called save() on missing file, emitted changed() before file existed.
+#     Fixed: load() silently initialises empty; first user action writes valid file.
+# C5: fireReminder/composeForHummingbird/sendEmail/sendNtfy blocked on GUI thread.
+#     Fixed: deliver() schedules transport work on QThreadPool workers (off GUI thread).
+# C6: importICS did not validate parsed date/time — malformed ICS injected garbage.
+#     Fixed: normaliseAppointment() validates/defaults every field.
+# C7: configPath() hardcoded ".config/ncde" — failed if XDG_CONFIG_HOME set.
+#     Fixed: QStandardPaths::writableLocation(ConfigLocation).
+# C10: upsertAppointment with empty id generated 8-char UUID (left(8)) — too short for ICS UID.
+#      Fixed: newUid() returns full 36-char UUID.
+# C14: No reload() — cal-reminders daemon rewrites calendar.json every minute out of process;
+#      without reload(), shell's copy drifts and next save() clobbers daemon's appends.
+#      Fixed: reload() added.
+# C15: No canDeliver() — checkbox for unavailable method (email without msmtp) failed silently.
+#      Fixed: canDeliver() checks notify-send/curl/msmtp executables.
+# C16: dueReminders() — reminder rule duplicated in cal-logic.js (QML) and cal-reminders daemon.
+#      Fixed: C++ implementation exposed for QML/testability; daemon reads JSON.
+# C17: lastDeliveryError() — operator must see why chosen method failed.
+#      Fixed: stored on each deliver() call and exposed.
+
+    Q_INVOKABLE public void reload();
+    Q_INVOKABLE public QString configFilePath();
+    Q_INVOKABLE public QVariantList dueReminders(int horizonDays);
+    Q_INVOKABLE public QVariantList dueReminders();
+    Q_INVOKABLE public bool canDeliver(QString method);
+    Q_INVOKABLE public QString lastDeliveryError();

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Chromium
+GenericName=Web Browser
+Comment=NCDE Chromium — Belle Époque / Concordia livery
+Exec=/usr/local/bin/ncde-chromium %U
+Icon=chromium
+Categories=Network;WebBrowser;
+MimeType=text/html;text/xml;application/xhtml+xml;application/xml;application/rss+xml;application/rdf+xml;x-scheme-handler/http;x-scheme-handler/https;
+StartupNotify=true
+StartupWMClass=chromium

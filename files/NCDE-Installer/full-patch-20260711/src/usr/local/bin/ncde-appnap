@@ -1,0 +1,813 @@
+#!/usr/bin/env python3
+# ncde-appnap — NCDE App-Nap tier driver ("Lelan deciding").
+#
+# Standalone daemon. Watches X11 focus/visibility state that LaPivot publishes
+# (EWMH: _NET_ACTIVE_WINDOW, _NET_CLIENT_LIST, _NET_WM_STATE, _NET_WM_PID) and
+# maps each top-level window's PID to a resource tier, then asks Sentinel to
+# apply it via io.ncde.Sentinel.SetProcessTier over the D-Bus SYSTEM bus.
+#
+# Chain of command (per NCDE design):
+#   Lelan (this driver) DECIDES the tier. Sentinel ACTS (drives cgroup-v2).
+#   This driver NEVER modifies the window manager — zero regression risk.
+#
+# Tier policy (seamless is the bar):
+#   focused window          -> "foreground"  (Sentinel: CPUWeight 100)
+#   visible, not focused     -> "background"  (Sentinel: CPUWeight 50)
+#   hidden / minimized       -> "hidden"      (Sentinel: CPUWeight 10, never frozen)
+#   All inside one per-user apps slice, so apps only ever yield to each other
+#   and never out-weigh the shell or Xorg (Sentinel 2026-09-25 fix).
+#   (Games are held foreground by Sentinel itself, regardless of what we send.)
+#
+# Robustness:
+#   - Debounces focus/state churn (~250 ms) so alt-tab storms don't thrash cgroups.
+#   - Survives windows/pids vanishing mid-query (custom X error handler swallows
+#     BadWindow/BadDrawable/BadValue instead of aborting).
+#   - Retries D-Bus if Sentinel is not up yet; a failed apply is retried next cycle.
+#   - Only touches PIDs that own a window; windowless pids are never tiered.
+#   - Handles pid reuse (a pid is cleared once its last window is gone).
+#   - On exit, ClearProcessTier for every pid it still manages.
+#
+# X11 is accessed through libX11 via ctypes (no python-xlib dependency needed).
+
+import ctypes
+import ctypes.util
+import errno
+import os
+import select
+import signal
+import sys
+import time
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+DEBOUNCE_SEC = 0.25          # coalesce X events for this long before applying
+RECONNECT_BACKOFF = 2.0      # wait between X display reconnect attempts
+DBUS_MIN_RETRY = 1.0         # min wait between Sentinel reconnect attempts
+
+SENTINEL_SERVICE = "io.ncde.Sentinel"
+SENTINEL_PATH = "/io/ncde/Sentinel"
+SENTINEL_IFACE = "io.ncde.Sentinel"
+
+TIER_FOREGROUND = "foreground"
+TIER_BACKGROUND = "background"
+TIER_HIDDEN = "hidden"
+
+# Session infrastructure owns X windows but never takes focus — App Nap must
+# never tier it down (a compositor at background weight = frame drops under
+# load; the WM itself at weight 25 = input lag). Mirrors ncde-session's
+# hard-deny list: apps nap, the house does not.
+EXEMPT_COMMS = {"LaPivot", "ncde-wm", "picom", "xfce-polkit", "xembedsniproxy",
+                "xss-lock", "ncde-frame", "ncde-container"}
+# /proc/<pid>/comm is cut to 15 chars: xdg-desktop-portal-gtk reads
+# "xdg-desktop-por", so the old "xdg-desktop-portal" prefix never matched and
+# the file-dialog portal was napped as "hidden" (found live 2026-09-25).
+EXEMPT_COMM_PREFIXES = ("xdg-desktop-por",)
+
+# Any app can spawn a privileged pacman/yay/paru transaction (NCDE Command's
+# updater, a terminal, whatever) and the user can alt-tab away from it mid-run
+# without expecting it to die. STARVED weight 1 routinely blows through these
+# tools' own completion timeouts, so the caller kills its own subprocess with
+# no error logged anywhere — this was mistaken for a "sudo failure" once
+# already (NCDE Command, 2026-07-13). Package-manager descendants are checked
+# fresh on every cycle (not cached) since they come and go.
+PKG_MANAGER_COMMS = {"pacman", "yay", "paru", "pamac", "pacman-key"}
+_PKG_WALK_MAX_DEPTH = 8
+
+
+def _comm(pid):
+    try:
+        with open("/proc/%d/comm" % pid) as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def _is_exempt(pid):
+    c = _comm(pid)
+    return c in EXEMPT_COMMS or c.startswith(EXEMPT_COMM_PREFIXES)
+
+
+def _children(pid):
+    try:
+        with open("/proc/%d/task/%d/children" % (pid, pid)) as f:
+            return [int(p) for p in f.read().split()]
+    except (OSError, ValueError):
+        return []
+
+
+def _has_active_pkg_descendant(pid, _depth=0):
+    if _depth > _PKG_WALK_MAX_DEPTH:
+        return False
+    for child in _children(pid):
+        if _comm(child) in PKG_MANAGER_COMMS:
+            return True
+        if _has_active_pkg_descendant(child, _depth + 1):
+            return True
+    return False
+
+
+def log(msg):
+    sys.stderr.write("ncde-appnap: %s\n" % msg)
+    sys.stderr.flush()
+
+
+# ---------------------------------------------------------------------------
+# X11 (libX11) via ctypes
+# ---------------------------------------------------------------------------
+
+# Event masks
+PropertyChangeMask = 1 << 22
+SubstructureNotifyMask = 1 << 19
+StructureNotifyMask = 1 << 17
+
+# Event type codes
+PropertyNotify = 28
+DestroyNotify = 17
+UnmapNotify = 18
+MapNotify = 19
+CreateNotify = 16
+ReparentNotify = 21
+
+# map_state values from XWindowAttributes
+IsUnmapped = 0
+IsUnviewable = 1
+IsViewable = 2
+
+AnyPropertyType = 0
+XA_WINDOW = 33       # predefined atom
+XA_CARDINAL = 6      # predefined atom
+XA_ATOM = 4          # predefined atom
+Success = 0
+
+
+class XWindowAttributes(ctypes.Structure):
+    # Layout must match Xlib.h exactly so map_state lands correctly.
+    _fields_ = [
+        ("x", ctypes.c_int),
+        ("y", ctypes.c_int),
+        ("width", ctypes.c_int),
+        ("height", ctypes.c_int),
+        ("border_width", ctypes.c_int),
+        ("depth", ctypes.c_int),
+        ("visual", ctypes.c_void_p),
+        ("root", ctypes.c_ulong),
+        ("c_class", ctypes.c_int),
+        ("bit_gravity", ctypes.c_int),
+        ("win_gravity", ctypes.c_int),
+        ("backing_store", ctypes.c_int),
+        ("backing_planes", ctypes.c_ulong),
+        ("backing_pixel", ctypes.c_ulong),
+        ("save_under", ctypes.c_int),
+        ("colormap", ctypes.c_ulong),
+        ("map_installed", ctypes.c_int),
+        ("map_state", ctypes.c_int),
+        ("all_event_masks", ctypes.c_long),
+        ("your_event_mask", ctypes.c_long),
+        ("do_not_propagate_mask", ctypes.c_long),
+        ("override_redirect", ctypes.c_int),
+        ("screen", ctypes.c_void_p),
+    ]
+
+
+class XAnyEvent(ctypes.Structure):
+    _fields_ = [
+        ("type", ctypes.c_int),
+        ("serial", ctypes.c_ulong),
+        ("send_event", ctypes.c_int),
+        ("display", ctypes.c_void_p),
+        ("window", ctypes.c_ulong),
+    ]
+
+
+class XPropertyEvent(ctypes.Structure):
+    _fields_ = [
+        ("type", ctypes.c_int),
+        ("serial", ctypes.c_ulong),
+        ("send_event", ctypes.c_int),
+        ("display", ctypes.c_void_p),
+        ("window", ctypes.c_ulong),
+        ("atom", ctypes.c_ulong),
+        ("time", ctypes.c_ulong),
+        ("state", ctypes.c_int),
+    ]
+
+
+class XMapEvent(ctypes.Structure):
+    # Shared layout for Map/Unmap/Destroy/Create (we only read .window and,
+    # for CreateNotify, treat .window as the created child via a separate read).
+    _fields_ = [
+        ("type", ctypes.c_int),
+        ("serial", ctypes.c_ulong),
+        ("send_event", ctypes.c_int),
+        ("display", ctypes.c_void_p),
+        ("event", ctypes.c_ulong),   # the window on which the event was selected
+        ("window", ctypes.c_ulong),  # the child window affected
+    ]
+
+
+class XEvent(ctypes.Union):
+    # Large enough to hold any XEvent (192 bytes on 64-bit is generous).
+    _fields_ = [
+        ("type", ctypes.c_int),
+        ("xany", XAnyEvent),
+        ("xproperty", XPropertyEvent),
+        ("xmap", XMapEvent),
+        ("pad", ctypes.c_long * 24),
+    ]
+
+
+# ctypes error-handler callback type: int handler(Display*, XErrorEvent*)
+XErrorHandlerType = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)
+XIOErrorHandlerType = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)
+
+
+class XConnectionLost(Exception):
+    pass
+
+
+class X11:
+    def __init__(self):
+        libname = ctypes.util.find_library("X11")
+        if not libname:
+            raise RuntimeError("libX11 not found")
+        self.lib = ctypes.CDLL(libname)
+        self._bind()
+        self.dpy = None
+        self.root = 0
+        self.atoms = {}
+        # Keep references to the callbacks so they are not garbage collected.
+        self._err_cb = XErrorHandlerType(self._on_x_error)
+        self._ioerr_cb = XIOErrorHandlerType(self._on_x_ioerror)
+
+    def _bind(self):
+        L = self.lib
+        L.XOpenDisplay.restype = ctypes.c_void_p
+        L.XOpenDisplay.argtypes = [ctypes.c_char_p]
+        L.XCloseDisplay.argtypes = [ctypes.c_void_p]
+        L.XDefaultRootWindow.restype = ctypes.c_ulong
+        L.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+        L.XInternAtom.restype = ctypes.c_ulong
+        L.XInternAtom.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+        L.XSelectInput.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_long]
+        L.XFree.argtypes = [ctypes.c_void_p]
+        L.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        L.XPending.restype = ctypes.c_int
+        L.XPending.argtypes = [ctypes.c_void_p]
+        L.XNextEvent.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        L.XConnectionNumber.restype = ctypes.c_int
+        L.XConnectionNumber.argtypes = [ctypes.c_void_p]
+        L.XSetErrorHandler.restype = ctypes.c_void_p
+        L.XSetErrorHandler.argtypes = [XErrorHandlerType]
+        L.XSetIOErrorHandler.restype = ctypes.c_void_p
+        L.XSetIOErrorHandler.argtypes = [XIOErrorHandlerType]
+        L.XGetWindowAttributes.restype = ctypes.c_int
+        L.XGetWindowAttributes.argtypes = [
+            ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(XWindowAttributes)]
+        L.XQueryTree.restype = ctypes.c_int
+        L.XQueryTree.argtypes = [
+            ctypes.c_void_p, ctypes.c_ulong,
+            ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_ulong),
+            ctypes.POINTER(ctypes.POINTER(ctypes.c_ulong)),
+            ctypes.POINTER(ctypes.c_uint)]
+        L.XGetWindowProperty.restype = ctypes.c_int
+        L.XGetWindowProperty.argtypes = [
+            ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong,
+            ctypes.c_long, ctypes.c_long, ctypes.c_int, ctypes.c_ulong,
+            ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_ulong),
+            ctypes.POINTER(ctypes.POINTER(ctypes.c_ubyte))]
+
+    # -- error handlers ------------------------------------------------------
+    def _on_x_error(self, dpy, err):
+        # Swallow all protocol errors (BadWindow etc.) — windows race away
+        # under us constantly. Returning 0 keeps Xlib alive.
+        return 0
+
+    def _on_x_ioerror(self, dpy):
+        # Connection to the X server was lost. Xlib will call exit() after this
+        # returns unless we longjmp; we cannot longjmp from Python, so mark the
+        # display dead and let the process be restarted by systemd. But first
+        # try to raise so the main loop can react on the next boundary.
+        self.dpy = None
+        # Returning triggers Xlib's default exit(1); systemd restarts us.
+        return 0
+
+    # -- lifecycle -----------------------------------------------------------
+    def open(self):
+        self.lib.XSetErrorHandler(self._err_cb)
+        self.lib.XSetIOErrorHandler(self._ioerr_cb)
+        dpy = self.lib.XOpenDisplay(None)
+        if not dpy:
+            raise XConnectionLost("XOpenDisplay failed (DISPLAY=%r)"
+                                  % os.environ.get("DISPLAY"))
+        self.dpy = dpy
+        self.root = self.lib.XDefaultRootWindow(dpy)
+        # Root: focus changes (_NET_ACTIVE_WINDOW), client list changes
+        # (_NET_CLIENT_LIST) arrive as PropertyNotify; map/unmap of children
+        # arrive via SubstructureNotify.
+        self.lib.XSelectInput(dpy, self.root,
+                              PropertyChangeMask | SubstructureNotifyMask)
+        self.lib.XSync(dpy, 0)
+
+    def close(self):
+        if self.dpy:
+            try:
+                self.lib.XCloseDisplay(self.dpy)
+            except Exception:
+                pass
+        self.dpy = None
+
+    def fileno(self):
+        return self.lib.XConnectionNumber(self.dpy)
+
+    def atom(self, name):
+        a = self.atoms.get(name)
+        if a is None:
+            a = self.lib.XInternAtom(self.dpy, name.encode(), 0)
+            self.atoms[name] = a
+        return a
+
+    def sync(self):
+        self.lib.XSync(self.dpy, 0)
+
+    def select_window(self, win):
+        # Watch a client window for _NET_WM_STATE changes (minimize) and
+        # its destruction. Errors (window already gone) are swallowed.
+        self.lib.XSelectInput(self.dpy, win,
+                              PropertyChangeMask | StructureNotifyMask)
+
+    def pending(self):
+        return self.lib.XPending(self.dpy)
+
+    def next_event(self, ev):
+        self.lib.XNextEvent(self.dpy, ctypes.byref(ev))
+
+    # -- property helpers ----------------------------------------------------
+    def _get_property_raw(self, win, prop_atom, req_type):
+        actual_type = ctypes.c_ulong()
+        actual_format = ctypes.c_int()
+        nitems = ctypes.c_ulong()
+        bytes_after = ctypes.c_ulong()
+        data = ctypes.POINTER(ctypes.c_ubyte)()
+        status = self.lib.XGetWindowProperty(
+            self.dpy, win, prop_atom, 0, 65536, 0, req_type,
+            ctypes.byref(actual_type), ctypes.byref(actual_format),
+            ctypes.byref(nitems), ctypes.byref(bytes_after),
+            ctypes.byref(data))
+        if status != Success:
+            return None
+        if not data:
+            return None
+        if actual_format.value == 0 or nitems.value == 0:
+            self.lib.XFree(data)
+            return None
+        return actual_format.value, nitems.value, data
+
+    def get_cardinal_list(self, win, prop_name, req_type=AnyPropertyType):
+        """Return a list of 32-bit values (WINDOW/CARDINAL/ATOM) or []."""
+        prop = self.atom(prop_name)
+        res = self._get_property_raw(win, prop, req_type)
+        if res is None:
+            return []
+        fmt, n, data = res
+        out = []
+        if fmt == 32:
+            arr = ctypes.cast(data, ctypes.POINTER(ctypes.c_ulong))
+            out = [arr[i] for i in range(n)]
+        self.lib.XFree(data)
+        return out
+
+    def get_first_cardinal(self, win, prop_name, req_type=AnyPropertyType):
+        vals = self.get_cardinal_list(win, prop_name, req_type)
+        return vals[0] if vals else None
+
+    def get_window_attributes(self, win):
+        attrs = XWindowAttributes()
+        ok = self.lib.XGetWindowAttributes(self.dpy, win, ctypes.byref(attrs))
+        if ok == 0:
+            return None
+        return attrs
+
+    def query_tree_children(self, win):
+        root_ret = ctypes.c_ulong()
+        parent_ret = ctypes.c_ulong()
+        children = ctypes.POINTER(ctypes.c_ulong)()
+        nchildren = ctypes.c_uint()
+        ok = self.lib.XQueryTree(
+            self.dpy, win, ctypes.byref(root_ret), ctypes.byref(parent_ret),
+            ctypes.byref(children), ctypes.byref(nchildren))
+        if ok == 0:
+            return []
+        out = [children[i] for i in range(nchildren.value)]
+        if children:
+            self.lib.XFree(children)
+        return out
+
+
+# ---------------------------------------------------------------------------
+# Sentinel D-Bus client (system bus) with lazy connect + retry
+# ---------------------------------------------------------------------------
+import dbus  # noqa: E402  (import after ctypes setup for clarity)
+
+
+class Sentinel:
+    def __init__(self):
+        self._iface = None
+        self._last_try = 0.0
+
+    def _ensure(self):
+        if self._iface is not None:
+            return True
+        now = time.monotonic()
+        if now - self._last_try < DBUS_MIN_RETRY:
+            return False
+        self._last_try = now
+        try:
+            bus = dbus.SystemBus()
+            obj = bus.get_object(SENTINEL_SERVICE, SENTINEL_PATH)
+            self._iface = dbus.Interface(obj, SENTINEL_IFACE)
+            # Prove the service really answers before declaring it up.
+            self._iface.GetHardwareTier()
+            log("connected to %s (hw tier=%s)"
+                % (SENTINEL_SERVICE, str(self._iface.GetHardwareTier())))
+            return True
+        except dbus.DBusException as e:
+            self._iface = None
+            log("Sentinel not available yet: %s" % e.get_dbus_name())
+            return False
+
+    def _drop(self):
+        self._iface = None
+
+    def set_tier(self, pid, tier):
+        """Return True on confirmed apply, False otherwise (caller retries)."""
+        if not self._ensure():
+            return False
+        try:
+            ok = self._iface.SetProcessTier(dbus.UInt32(pid), tier)
+            return bool(ok)
+        except dbus.DBusException as e:
+            log("SetProcessTier(%d,%s) failed: %s" % (pid, tier, e.get_dbus_name()))
+            self._drop()
+            return False
+
+    def clear_tier(self, pid):
+        if not self._ensure():
+            return False
+        try:
+            self._iface.ClearProcessTier(dbus.UInt32(pid))
+            return True
+        except dbus.DBusException as e:
+            log("ClearProcessTier(%d) failed: %s" % (pid, e.get_dbus_name()))
+            self._drop()
+            return False
+
+
+# ---------------------------------------------------------------------------
+# Driver
+# ---------------------------------------------------------------------------
+class Driver:
+    def __init__(self):
+        self.x = X11()
+        self.sentinel = Sentinel()
+        self.watched = set()          # window ids we've XSelectInput'd
+        self.managed = {}             # pid -> last successfully applied tier
+        self._running = True
+        self._dirty = True            # force an initial evaluation
+        self._deadline = 0.0
+
+    # -- pid liveness --------------------------------------------------------
+    @staticmethod
+    def _pid_alive(pid):
+        try:
+            os.stat("/proc/%d" % pid)
+            return True
+        except OSError:
+            return False
+
+    # -- window inspection ---------------------------------------------------
+    def _window_pid(self, win):
+        pid = self.x.get_first_cardinal(win, "_NET_WM_PID", XA_CARDINAL)
+        if pid is None or pid <= 0:
+            return None
+        return int(pid)
+
+    def _window_hidden(self, win):
+        # Authoritative EWMH signal: _NET_WM_STATE_HIDDEN (minimized/shaded).
+        hidden_atom = self.x.atom("_NET_WM_STATE_HIDDEN")
+        states = self.x.get_cardinal_list(win, "_NET_WM_STATE", XA_ATOM)
+        if hidden_atom in states:
+            return True
+        # Belt-and-suspenders: a window that is not viewable (unmapped, or on an
+        # inactive workspace that the WM unmaps) is not consuming visible pixels.
+        attrs = self.x.get_window_attributes(win)
+        if attrs is None:
+            # Window vanished — treat as gone/hidden.
+            return True
+        if attrs.map_state != IsViewable:
+            return True
+        return False
+
+    # Cap tree-walk depth: root -> frame(s) -> client -> children is shallow;
+    # this bounds work and guards against pathological/looping trees.
+    _WALK_MAX_DEPTH = 8
+
+    def _client_windows(self):
+        # Fast path: if the WM publishes EWMH _NET_CLIENT_LIST, trust it
+        # (correct even for reparenting WMs, and cheaper than a tree walk).
+        wins = self.x.get_cardinal_list(self.x.root, "_NET_CLIENT_LIST", XA_WINDOW)
+        if wins:
+            return [int(w) for w in wins if w]
+        # Fallback: LaPivot does NOT publish _NET_CLIENT_LIST, so walk the
+        # window tree from the root. A client window is the first window down
+        # each branch that carries _NET_WM_PID; we stop descending past it
+        # (a client's own sub-windows don't set _NET_WM_PID and aren't ours).
+        found = []
+        seen = set()
+        stack = [(self.x.root, 0)]
+        while stack:
+            win, depth = stack.pop()
+            if depth > self._WALK_MAX_DEPTH:
+                continue
+            for child in self.x.query_tree_children(win):
+                if child in seen:
+                    continue
+                seen.add(child)
+                if self._window_pid(child) is not None:
+                    found.append(int(child))
+                else:
+                    stack.append((child, depth + 1))
+        return found
+
+    def _active_window(self):
+        w = self.x.get_first_cardinal(self.x.root, "_NET_ACTIVE_WINDOW", XA_WINDOW)
+        if w is None:
+            return 0
+        return int(w)
+
+    # -- the decision --------------------------------------------------------
+    def _compute_desired(self):
+        """Return {pid: tier} for every pid that currently owns a window."""
+        active = self._active_window()
+        active_pid = None
+        if active:
+            active_pid = self._window_pid(active)
+
+        desired = {}
+        for win in self._client_windows():
+            if win not in self.watched:
+                self.x.select_window(win)
+                self.watched.add(win)
+            pid = self._window_pid(win)
+            if pid is None:
+                continue
+            if _is_exempt(pid):
+                continue
+            focused = (pid == active_pid) and active_pid is not None
+            if focused:
+                tier = TIER_FOREGROUND
+            elif self._window_hidden(win):
+                # Never starve a hidden app that's mid package-transaction —
+                # see PKG_MANAGER_COMMS above.
+                tier = TIER_BACKGROUND if _has_active_pkg_descendant(pid) else TIER_HIDDEN
+            else:
+                tier = TIER_BACKGROUND
+            # Aggregate across a pid's multiple windows: pick the most awake.
+            prev = desired.get(pid)
+            desired[pid] = self._max_tier(prev, tier)
+        # Flush any accumulated X errors from the reads above.
+        self.x.sync()
+        return desired
+
+    @staticmethod
+    def _max_tier(a, b):
+        rank = {TIER_HIDDEN: 0, TIER_BACKGROUND: 1, TIER_FOREGROUND: 2}
+        if a is None:
+            return b
+        return a if rank[a] >= rank[b] else b
+
+    def _apply(self):
+        desired = self._compute_desired()
+        retry = False
+
+        # Push changed tiers.
+        for pid, tier in desired.items():
+            if self.managed.get(pid) == tier:
+                continue
+            if self.sentinel.set_tier(pid, tier):
+                if self.managed.get(pid) != tier:
+                    log("pid %d -> %s" % (pid, tier))
+                self.managed[pid] = tier
+            else:
+                # Leave managed[pid] unchanged so the value is still wrong until
+                # a retry lands -- but "retry next cycle" only meant something if
+                # something else re-marks dirty. It didn't: Sentinel restarting
+                # mid-deploy (routine, happens on every patch run) drops exactly
+                # one SetProcessTier call with DBus.Error.ServiceUnknown, then
+                # self-heals -- but nothing re-armed the loop, so the wrong tier
+                # could sit until the next real window focus/visibility change,
+                # which might be seconds away. Confirmed live 2026-07-14.
+                retry = True
+
+        # Clear pids that no longer own any window (or whose process is gone).
+        for pid in list(self.managed.keys()):
+            if pid in desired:
+                continue
+            if not self._pid_alive(pid):
+                # Process already exited: its scope is gone with it; just forget.
+                del self.managed[pid]
+                continue
+            if self.sentinel.clear_tier(pid):
+                log("pid %d -> cleared (no windows)" % pid)
+                del self.managed[pid]
+            else:
+                retry = True  # same reasoning as above
+
+        # Re-arm one more debounced pass (250ms), not a poll loop: this only
+        # fires when there's an actual pending failure to resolve, and stops
+        # firing the moment it resolves (self.dirty is cleared by run() right
+        # before _apply() is called, so this is the only thing keeping it alive).
+        if retry:
+            self._mark_dirty()
+
+    # -- event pump ----------------------------------------------------------
+    def _drain_events(self):
+        ev = XEvent()
+        watched_atoms = {
+            self.x.atom("_NET_ACTIVE_WINDOW"),
+            self.x.atom("_NET_CLIENT_LIST"),
+            self.x.atom("_NET_WM_STATE"),
+        }
+        while self.x.pending() > 0:
+            self.x.next_event(ev)
+            et = ev.type
+            if et == PropertyNotify:
+                if ev.xproperty.atom in watched_atoms:
+                    self._mark_dirty()
+            elif et in (MapNotify, UnmapNotify, DestroyNotify, ReparentNotify,
+                        CreateNotify):
+                # Membership/visibility of the window set changed.
+                if et == DestroyNotify:
+                    self.watched.discard(ev.xmap.window)
+                self._mark_dirty()
+
+    def _mark_dirty(self):
+        if not self._dirty:
+            self._deadline = time.monotonic() + DEBOUNCE_SEC
+        self._dirty = True
+
+    def _time_until_deadline(self):
+        if not self._dirty:
+            return None
+        return max(0.0, self._deadline - time.monotonic())
+
+    def run(self):
+        self._connect_x_with_retry()
+        # First pass is immediate (deadline already in the past).
+        self._deadline = time.monotonic()
+        while self._running:
+            timeout = self._time_until_deadline()
+            try:
+                xfd = self.x.fileno()
+            except Exception:
+                self._connect_x_with_retry()
+                continue
+            try:
+                rlist, _, _ = select.select([xfd], [], [], timeout)
+            except InterruptedError:
+                continue
+            except OSError as e:
+                if e.errno == errno.EINTR:
+                    continue
+                raise
+            if not self._running:
+                break
+            if rlist:
+                try:
+                    self._drain_events()
+                except Exception as e:
+                    log("event drain error: %s" % e)
+            # Apply once the debounce window has elapsed.
+            if self._dirty and time.monotonic() >= self._deadline:
+                self._dirty = False
+                try:
+                    self._apply()
+                except Exception as e:
+                    log("apply error: %s" % e)
+
+    @staticmethod
+    def _session_x_env():
+        """Best-effort DISPLAY + XAUTHORITY of the graphical session, read from
+        the WM's own /proc/<pid>/environ. Same pattern as Sentinel's
+        gamemode.py:_session_x_env() (root there, this process's own user here
+        — same-UID /proc/<pid>/environ reads need no special privilege)."""
+        for name in ("LaPivot", "ncde-wm"):
+            for entry in os.listdir("/proc"):
+                if not entry.isdigit():
+                    continue
+                try:
+                    if open("/proc/%s/comm" % entry).read().strip() != name:
+                        continue
+                    env = dict(
+                        kv.split("=", 1)
+                        for kv in open("/proc/%s/environ" % entry).read().split("\0")
+                        if "=" in kv)
+                except OSError:
+                    continue
+                disp = env.get("DISPLAY")
+                if disp:
+                    return disp, env.get("XAUTHORITY", "")
+        # 2026-09-24: the scan above can NEVER succeed for LaPivot — it carries a file
+        # capability (cap_sys_nice), so the kernel marks it non-dumpable and its
+        # /proc/<pid>/environ is unreadable even to its own user. Result: this service
+        # retried "Authorization required" every 2 s from boot, all day, and napped
+        # nothing. The session's own login import lands in the systemd --user
+        # manager's environment (DISPLAY + XAUTHORITY=/run/ncde-portal/Xauthority,
+        # verified live) — ask it over the session bus.
+        try:
+            mgr = dbus.SessionBus().get_object("org.freedesktop.systemd1", "/org/freedesktop/systemd1")
+            envl = mgr.Get("org.freedesktop.systemd1.Manager", "Environment",
+                           dbus_interface="org.freedesktop.DBus.Properties")
+            env = dict(str(kv).split("=", 1) for kv in envl if "=" in str(kv))
+            if env.get("DISPLAY"):
+                return env["DISPLAY"], env.get("XAUTHORITY", "")
+        except Exception:
+            pass
+        return None
+
+    def _connect_x_with_retry(self):
+        while self._running:
+            # Re-discover the session's real DISPLAY/XAUTHORITY on every attempt,
+            # not just once at process start. The prior fix only defaulted
+            # DISPLAY for the first-login race (see main()); XAUTHORITY was never
+            # set at all, so once the retry loop started with an empty/wrong
+            # XAUTHORITY it could NEVER succeed, no matter how long it waited —
+            # confirmed live: 1.5h+ of continuous "Authorization required"
+            # failures on this exact machine. Pulling fresh values from the WM's
+            # own environment each attempt fixes the race permanently instead of
+            # papering over the one variable that happened to get a default.
+            live_env = self._session_x_env()
+            if live_env:
+                disp, xauth = live_env
+                os.environ["DISPLAY"] = disp
+                if xauth:
+                    os.environ["XAUTHORITY"] = xauth
+            try:
+                self.x.open()
+                log("connected to X display %s (root=0x%x)"
+                    % (os.environ.get("DISPLAY"), self.x.root))
+                return
+            except XConnectionLost as e:
+                log("X connect failed: %s (retrying)" % e)
+                self._sleep_interruptible(RECONNECT_BACKOFF)
+
+    def _sleep_interruptible(self, secs):
+        end = time.monotonic() + secs
+        while self._running and time.monotonic() < end:
+            time.sleep(min(0.2, end - time.monotonic()))
+
+    # -- shutdown ------------------------------------------------------------
+    def stop(self, *_):
+        self._running = False
+
+    def cleanup(self):
+        # Release every pid we still hold so nothing is left napped once the
+        # driver is gone: when App-Nap is not supervising, apps should run at
+        # full speed. NOTE (verified live on this node): Sentinel's
+        # ClearProcessTier is a no-op on the cgroup weight — it does not lift a
+        # starved (weight-1) process out of its scope. So we FIRST raise every
+        # managed pid to "foreground" (un-nap it to full speed) and THEN call
+        # ClearProcessTier for the record. This guarantees no window's process
+        # is left starved after we exit, using only the documented API.
+        if not self.managed:
+            return
+        log("releasing %d managed pid(s) on exit" % len(self.managed))
+        for pid in list(self.managed.keys()):
+            if self._pid_alive(pid):
+                if self.managed.get(pid) != TIER_FOREGROUND:
+                    self.sentinel.set_tier(pid, TIER_FOREGROUND)
+                self.sentinel.clear_tier(pid)
+            del self.managed[pid]
+
+
+def main():
+    if not os.environ.get("DISPLAY"):
+        # First-login race: the unit can start before ncde-x11-session runs
+        # import-environment. NCDE sessions are always :0 — default and let
+        # the X connect retry loop wait for the server.
+        log("DISPLAY not set (started before session env import); defaulting to :0")
+        os.environ["DISPLAY"] = ":0"
+    driver = Driver()
+    signal.signal(signal.SIGTERM, driver.stop)
+    signal.signal(signal.SIGINT, driver.stop)
+    try:
+        driver.run()
+    finally:
+        driver.cleanup()
+        driver.x.close()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

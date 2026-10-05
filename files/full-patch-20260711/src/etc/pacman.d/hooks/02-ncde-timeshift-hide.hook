@@ -1,0 +1,14 @@
+# NCDE fix 2026-07-17 — re-hide Timeshift from menus after every Timeshift
+# install/upgrade. Soundings is the single restore path; NoDisplay=true isn't
+# in timeshift's backup array, so pacman silently drops it on update without
+# this.
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = timeshift
+
+[Action]
+Description = NCDE: re-hiding Timeshift from menus...
+When = PostTransaction
+Exec = /usr/local/lib/ncde/ncde-timeshift-hide

@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NCDE Settings — Operating Manual</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700;900&family=Cinzel:wght@500;600;700&family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500;1,600&family=IM+Fell+English:ital@0;1&family=EB+Garamond:ital,wght@0,500;0,600;1,500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper0:#fbf6e9;--paper1:#f6efdc;--paper2:#ece2c6;--paper3:#d8cba8;
+    --gilt0:#5a3a14;--gilt1:#8a5a20;--gilt2:#b07a30;--gilt3:#c98a3a;--gilt4:#e9c97c;--gilt5:#f6e3b0;
+    --wine1:#2a0612;--wine2:#4a0e22;--wine3:#6e1832;--wine4:#8b1e3f;
+    --verd:#3a7a5e;--cer:#2f8aa0;--plum:#6a4a8b;--rose:#c64b63;--amber:#d99a3a;
+    --ink:#2a2418;--inkSoft:#5e5142;
+    --display:'Cinzel Decorative',serif;--titles:'Cinzel',serif;
+    --serif:'Cormorant Garamond',serif;--fell:'IM Fell English',serif;--gar:'EB Garamond',serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html{scroll-behavior:smooth;}
+  body{background:radial-gradient(ellipse at 50% 0%,#3a2a3a,#1c1218 55%,#0d0810);
+    font-family:var(--serif);min-height:100vh;padding:30px 18px;display:flex;justify-content:center;}
+
+  .book{width:860px;background:linear-gradient(180deg,var(--paper0),var(--paper1));
+    border:2px solid var(--gilt0);border-radius:12px;box-shadow:0 0 0 1px var(--gilt3),0 34px 90px rgba(0,0,0,.6);
+    position:relative;overflow:hidden;}
+  .book::before{content:'';position:absolute;inset:6px;border:1px solid var(--gilt4);border-radius:8px;opacity:.55;pointer-events:none;}
+
+  /* frontispiece */
+  .front{padding:46px 60px 36px;text-align:center;border-bottom:2px solid var(--gilt2);position:relative;
+    background:radial-gradient(ellipse at 50% 0%,rgba(201,138,58,.12),transparent 70%);}
+  .crest{width:78px;height:78px;border-radius:50%;border:2px solid var(--gilt0);margin:0 auto 16px;
+    display:grid;place-items:center;font-family:var(--display);font-size:34px;color:var(--wine1);
+    background:radial-gradient(circle at 38% 32%,var(--gilt4),var(--gilt2) 65%,var(--gilt0));
+    box-shadow:0 0 0 5px rgba(233,201,124,.25);}
+  .front .ttl{font-family:var(--display);font-weight:900;font-size:34px;color:var(--wine2);letter-spacing:.04em;line-height:1.1;}
+  .front .sub{font-family:var(--fell);font-style:italic;font-size:16px;color:var(--inkSoft);margin-top:8px;letter-spacing:.06em;}
+  .front .orn{display:flex;align-items:center;justify-content:center;gap:14px;margin-top:18px;}
+  .front .orn .ln{width:90px;height:1px;background:linear-gradient(90deg,transparent,var(--gilt2));}
+  .front .orn .ln.r{background:linear-gradient(270deg,transparent,var(--gilt2));}
+  .front .orn .dot{width:9px;height:9px;border-radius:50%;background:var(--gilt3);box-shadow:0 0 0 3px rgba(201,138,58,.25);}
+
+  /* contents */
+  .toc{padding:26px 60px;border-bottom:1px solid var(--gilt2);column-count:2;column-gap:40px;}
+  .toc a{display:flex;align-items:baseline;gap:8px;text-decoration:none;font-family:var(--gar);font-size:14px;
+    color:var(--ink);padding:4px 0;break-inside:avoid;}
+  .toc a:hover{color:var(--wine3);}
+  .toc a .n{font-family:var(--titles);font-weight:600;font-size:12px;color:var(--gilt2);width:26px;}
+  .toc a .dots{flex:1;border-bottom:1px dotted var(--gilt2);transform:translateY(-3px);}
+
+  /* body */
+  .pages{padding:8px 60px 50px;}
+  section{padding-top:30px;}
+  .kicker{font-family:var(--fell);font-style:italic;font-size:12px;letter-spacing:.28em;color:var(--gilt1);text-transform:uppercase;}
+  h2{font-family:var(--display);font-weight:700;font-size:25px;color:var(--wine2);margin:3px 0 4px;letter-spacing:.02em;}
+  .lead{font-family:var(--serif);font-size:17px;font-style:italic;color:var(--inkSoft);margin-bottom:14px;}
+  .hr{height:2px;background:linear-gradient(90deg,var(--gilt3),transparent);opacity:.5;margin:6px 0 14px;}
+  p{font-family:var(--gar);font-size:15.5px;line-height:1.62;color:var(--ink);margin-bottom:12px;}
+  p b{color:var(--wine2);}
+  .drop::first-letter{font-family:var(--display);font-weight:900;font-size:52px;float:left;line-height:.82;
+    padding:4px 10px 2px 0;color:var(--gilt2);}
+  ul{margin:0 0 14px 4px;list-style:none;}
+  li{font-family:var(--gar);font-size:15px;line-height:1.5;color:var(--ink);padding:4px 0 4px 22px;position:relative;}
+  li::before{content:'❧';position:absolute;left:0;color:var(--gilt3);font-size:13px;top:5px;}
+  li b{color:var(--wine2);}
+
+  .group{margin:18px 0;border-left:3px solid var(--gilt3);padding:2px 0 2px 18px;}
+  .group h3{font-family:var(--titles);font-weight:700;font-size:16px;color:var(--wine3);margin-bottom:3px;letter-spacing:.04em;}
+  .group .d{font-family:var(--gar);font-size:14.5px;color:var(--ink);line-height:1.55;}
+
+  .card{border:1px solid var(--gilt2);border-radius:10px;background:rgba(255,255,255,.4);padding:16px 20px;margin:14px 0;}
+  .card.dark{background:linear-gradient(160deg,rgba(110,24,50,.07),rgba(47,138,160,.06));}
+  .card h4{font-family:var(--display);font-weight:700;font-size:13px;letter-spacing:.14em;color:var(--wine2);margin-bottom:8px;}
+  .keycap{display:inline-block;font-family:var(--titles);font-size:12px;color:var(--wine1);background:var(--gilt4);
+    border:1px solid var(--gilt2);border-radius:5px;padding:1px 8px;box-shadow:0 1px 0 var(--gilt2);}
+  .pill{display:inline-flex;align-items:center;gap:6px;font-family:var(--titles);font-size:12px;color:var(--wine1);
+    background:linear-gradient(180deg,var(--gilt4),var(--gilt3));border:1px solid var(--gilt0);border-radius:13px;padding:3px 12px;}
+  .jewel{display:inline-block;width:12px;height:12px;border-radius:50%;border:1px solid rgba(0,0,0,.35);vertical-align:middle;}
+  .jewel.min{background:radial-gradient(circle at 35% 30%,var(--gilt5),var(--gilt3));}
+  .jewel.max{background:radial-gradient(circle at 35% 30%,#7db8aa,var(--cer));}
+  .jewel.close{background:radial-gradient(circle at 35% 30%,#e08a9a,var(--wine4));}
+
+  .note{border:1px solid var(--cer);border-radius:8px;background:rgba(47,138,160,.07);padding:12px 16px;margin:12px 0;}
+  .note .t{font-family:var(--fell);font-style:italic;font-size:12px;letter-spacing:.16em;color:var(--cer);text-transform:uppercase;margin-bottom:4px;}
+  .note p{font-size:14.5px;margin:0;color:var(--ink);}
+
+  .colophon{padding:24px 60px 40px;border-top:2px solid var(--gilt2);text-align:center;
+    background:radial-gradient(ellipse at 50% 100%,rgba(201,138,58,.1),transparent 70%);}
+  .colophon p{font-family:var(--fell);font-style:italic;font-size:13px;color:var(--inkSoft);}
+  .floret{display:inline-block;width:20px;height:20px;border-radius:50%;margin:0 auto 10px;
+    background:radial-gradient(circle at 38% 34%,var(--gilt5),var(--gilt3) 60%,var(--gilt0));border:1px solid var(--gilt0);}
+</style>
+</head>
+<body>
+<div class="book">
+
+  <!-- FRONTISPIECE -->
+  <div class="front">
+    <div class="crest">N</div>
+    <div class="ttl">The Operating Manual</div>
+    <div class="sub">being a guide to the NCDE Settings — its rooms and their dials</div>
+    <div class="orn"><span class="ln"></span><span class="dot"></span><span class="ln r"></span></div>
+  </div>
+
+  <!-- CONTENTS -->
+  <nav class="toc">
+    <a href="#open"><span class="n">I</span>Opening &amp; Moving the Panel<span class="dots"></span></a>
+    <a href="#rail"><span class="n">II</span>The Three Wings<span class="dots"></span></a>
+    <a href="#filigree"><span class="n">III</span>Filigree — the Look<span class="dots"></span></a>
+    <a href="#wall"><span class="n">IV</span>Wallpapers &amp; Fonts<span class="dots"></span></a>
+    <a href="#display"><span class="n">V</span>Display<span class="dots"></span></a>
+    <a href="#input"><span class="n">VI</span>Input<span class="dots"></span></a>
+    <a href="#sound"><span class="n">VII</span>Sound<span class="dots"></span></a>
+    <a href="#power"><span class="n">VIII</span>Power<span class="dots"></span></a>
+    <a href="#datetime"><span class="n">IX</span>Date &amp; Time<span class="dots"></span></a>
+    <a href="#notif"><span class="n">X</span>Notifications<span class="dots"></span></a>
+    <a href="#session"><span class="n">XI</span>Session<span class="dots"></span></a>
+    <a href="#about"><span class="n">XII</span>About<span class="dots"></span></a>
+  </nav>
+
+  <div class="pages">
+
+    <section id="open">
+      <div class="kicker">Chapter the First</div>
+      <h2>Opening &amp; Moving the Panel</h2>
+      <div class="hr"></div>
+      <p class="drop">Open Settings from the dock, or by name from NCDE Command. The window wears no Motif frame — it carries its own three jewels at the right of the title cartouche. <span class="jewel min"></span> <b>minimises</b> to the dock; <span class="jewel max"></span> <b>maximises</b> or restores; <span class="jewel close"></span> <b>closes</b> the panel.</p>
+      <p>Take hold of the <b>cartouche</b> itself — the gilt-edged title bar reading <i>NCDE SETTINGS</i> — and drag to move the window anywhere on the desk. Every change you make is written the moment you make it; there is no <b>Save</b> button to remember, and no <b>Apply</b> to forget.</p>
+      <div class="note"><div class="t">A note on persistence</div><p>Settings take effect at once and survive a restart. Where a change touches the whole shell — a colour, a font, the glass — the desktop re-dresses itself live, without a logout.</p></div>
+    </section>
+
+    <section id="rail">
+      <div class="kicker">Chapter the Second</div>
+      <h2>The Three Wings</h2>
+      <div class="hr"></div>
+      <p>The rooms are gathered, at the left, into three wings. Choose a room and it opens on the right.</p>
+      <div class="group"><h3>Appearance</h3><div class="d"><b>Wallpapers</b>, <b>Filigree</b>, and <b>Fonts</b> — everything that governs how the desktop looks.</div></div>
+      <div class="group"><h3>Devices</h3><div class="d"><b>Display</b>, <b>Input</b>, <b>Sound</b>, and <b>Power</b> — the machine and its senses.</div></div>
+      <div class="group"><h3>System</h3><div class="d"><b>Dock &amp; Panels</b>, <b>Date &amp; Time</b>, <b>Notifications</b>, <b>Session</b>, and <b>About</b> — the running of the house.</div></div>
+      <div class="note"><div class="t">If you remember the old panel</div><p>The former <i>Accents</i> and <i>Glass</i> tabs are gone — their work now lives, more fully, inside <b>Filigree</b>. Nothing was lost; it was gathered into one hand.</p></div>
+    </section>
+
+    <section id="filigree">
+      <div class="kicker">Chapter the Third</div>
+      <h2>Filigree — the Look</h2>
+      <div class="lead">The visual-design authority. One room governs colour, glass, and the colour of type.</div>
+      <div class="hr"></div>
+      <p class="drop">Filigree begins with the <b>colour wheel</b>. Turn it and a five-tone palette is drawn beneath — <i>Ground, Surface, Accent, Highlight,</i> and <i>Quill</i> (the colour of text). The <b>Base Calm</b> dial quiets the grounds while leaving the accent bright, for a restrained desk that still keeps one vivid note.</p>
+      <ul>
+        <li><b>Harmony</b> offers single, complementary, triadic, or analogous schemes drawn from your chosen hue.</li>
+        <li><b>Contrast Guard</b> checks, live, that Quill stays legible on Ground and Surface — a tick or a cross, by the WCAG measure.</li>
+        <li><b>In Context</b> previews the palette over your real wallpaper, with a panel, a pane of glass, and a line of type.</li>
+        <li><b>Apply as Theme</b> commits the palette to the whole shell; <b>Lift current accent</b> pulls the desk's present colour back into the wheel to adjust.</li>
+      </ul>
+      <div class="group"><h3>Glass by Surface</h3><div class="d">Panels, Dock, Widgets, and Menus each take their own <b>Tint, Shine, Glow,</b> and <b>Border</b> — or press <b>Link all to accent</b> to keep them of one cloth.</div></div>
+      <div class="group"><h3>Widgets — Colour &amp; Type</h3><div class="d">The Clock, Space, Weather, Stats, and Salon Nocturne each carry their own <b>accent, text colour,</b> and <b>font</b>, shown in a little live preview as you choose.</div></div>
+      <div class="group"><h3>Font — Fill &amp; Outline</h3><div class="d">Type is given both a <b>fill</b> and an <b>outline</b>, with an outline width — so a title stays readable on glass or over a busy wallpaper.</div></div>
+      <p>Palettes you favour may be <b>named and saved</b> — Filigree even suggests a name in the period manner. Saved palettes restore with a tap.</p>
+    </section>
+
+    <section id="wall">
+      <div class="kicker">Chapter the Fourth</div>
+      <h2>Wallpapers &amp; Fonts</h2>
+      <div class="hr"></div>
+      <p><b>Wallpapers</b> dresses the desk from a gallery, with a <b>fit mode</b> (fill, fit, centre, tile, or span), an optional <b>per-monitor</b> choice, and a <b>slideshow</b> that rotates a folder on an interval. <b>Theme from Wallpaper</b> samples the picture's dominant colour and hands it to Filigree, so the whole shell can breathe with the image behind it.</p>
+      <p><b>Fonts</b> governs the families — an <b>Interface</b> face for titles and menus, a <b>Document</b> face for reading, and a <b>Fixed-width</b> face for terminals — with size scale, UI scale, hinting, and antialiasing. The <i>colour</i> of type is set next door, in Filigree.</p>
+    </section>
+
+    <section id="display">
+      <div class="kicker">Chapter the Fifth</div>
+      <h2>Display</h2>
+      <div class="hr"></div>
+      <p>Arrange your screens by sight, name a <b>primary</b>, and set each one's <b>resolution, refresh rate, scale,</b> and <b>orientation</b>. <b>Night Light</b> warms the screen from sunset to sunrise — and because NCDE already knows where you are (see Chapter the Ninth), it needs no times from you; it simply follows the sun.</p>
+    </section>
+
+    <section id="input">
+      <div class="kicker">Chapter the Sixth</div>
+      <h2>Input</h2>
+      <div class="hr"></div>
+      <p>Set the <b>keyboard</b> layout (a second may be added), with repeat delay and rate. For <b>mouse</b> and <b>touchpad</b>: pointer speed, natural scroll, tap-to-click, and disable-while-typing. The <b>cursor</b> takes a theme and a size — small, medium, or large.</p>
+    </section>
+
+    <section id="sound">
+      <div class="kicker">Chapter the Seventh</div>
+      <h2>Sound</h2>
+      <div class="hr"></div>
+      <p>Choose the <b>output</b> device and its volume and balance, the <b>input</b> device and its live level, and — below — a <b>per-application</b> mixer, so Salon Nocturne may sing while another app is hushed.</p>
+    </section>
+
+    <section id="power">
+      <div class="kicker">Chapter the Eighth</div>
+      <h2>Power</h2>
+      <div class="hr"></div>
+      <p>Two columns — <b>on battery</b> and <b>plugged in</b> — set when the screen blanks and when the machine suspends (<i>Never</i> is allowed). Then the behaviours: what the <b>lid</b> does when closed, what the <b>power button</b> does when pressed, and whether the battery shows its percent.</p>
+    </section>
+
+    <section id="datetime">
+      <div class="kicker">Chapter the Ninth</div>
+      <h2>Date &amp; Time</h2>
+      <div class="lead">The clock keeps itself. You should never set your timezone by hand.</div>
+      <div class="hr"></div>
+      <p class="drop">NCDE finds where you are from the network — no satellite, no fuss — and sets the <b>timezone</b> for you. A small map shows a pin and the badge <span class="pill">✦ Located automatically</span>. Travel to another city and the clock follows you; the zone updates itself when the network changes.</p>
+      <ul>
+        <li><b>Hour format</b> may be 12-hour, 24-hour, or <i>Auto</i> — which follows the region found for you.</li>
+        <li><b>Network time</b> keeps the hour true to the second.</li>
+        <li><b>Region &amp; Language</b> are likewise found automatically, setting date order, units, and the first day of the week.</li>
+      </ul>
+      <div class="note"><div class="t">If you would rather choose</div><p>An escape hatch, <b>“Set manually instead,”</b> waits beneath the map for the traveller who wants a fixed zone. Choosing one turns the automatic locating off until you ask for it again.</p></div>
+      <div class="card dark"><h4>ON YOUR PRIVACY</h4><p>NCDE asks once, by a gentle toast, before it uses your network location — and it speaks only to set your clock. The result is kept, and looked up afresh only when your network changes.</p></div>
+    </section>
+
+    <section id="notif">
+      <div class="kicker">Chapter the Tenth</div>
+      <h2>Notifications</h2>
+      <div class="hr"></div>
+      <p>Silence the desk with <b>Do Not Disturb</b>, choose a <b>corner</b> for banners, and set <b>Quiet Hours</b> — a nightly span when only an alarm may speak. Each application keeps its own switch, so the Courier may call while the Command centre stays silent.</p>
+    </section>
+
+    <section id="session">
+      <div class="kicker">Chapter the Eleventh</div>
+      <h2>Session</h2>
+      <div class="hr"></div>
+      <p><b>Autostart</b> lists the programs that wake with you; add one, name its command, and switch it on or off. <b>Default Applications</b> names your browser, mail, files, and terminal. At the foot wait <span class="pill">⟲ Log Out</span> and <b>Lock</b>, for the end of the day.</p>
+    </section>
+
+    <section id="about">
+      <div class="kicker">Chapter the Twelfth</div>
+      <h2>About</h2>
+      <div class="hr"></div>
+      <p>The last room tells you the <b>version</b> of NCDE, the compositor it runs upon, and the particulars of your machine — its processor, memory, graphics, and disk. From here, too, this very <b>Operating Manual</b> may be opened again whenever you wish.</p>
+    </section>
+
+  </div>
+
+  <!-- COLOPHON -->
+  <div class="colophon">
+    <div class="floret"></div>
+    <p>NCDE — Nouveau Common Desktop Environment · “Belle Époque”</p>
+    <p>Set in Cinzel &amp; Cormorant Garamond · printed by the house compositor</p>
+  </div>
+
+</div>
+</body>
+</html>

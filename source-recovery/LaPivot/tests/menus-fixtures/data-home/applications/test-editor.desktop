@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=User Editor (hidden override)
+Exec=record-app hidden-override
+Icon=user-editor
+Categories=Utility;
+Hidden=true

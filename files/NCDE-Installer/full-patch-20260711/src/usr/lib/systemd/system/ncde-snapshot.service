@@ -1,0 +1,24 @@
+[Unit]
+# NCDE System Restore ("Soundings") — take a read-only btrfs snapshot of the
+# running system once per boot, prune to the newest 7. Install target:
+# /usr/lib/systemd/system/ncde-snapshot.service  (enabled on the installed
+# system by chrooted_post_install.sh).
+Description=NCDE System Restore — boot snapshot (Soundings)
+Documentation=file:///usr/share/doc/ncde/NCDE-RECOVERY-APP.md
+DefaultDependencies=no
+After=local-fs.target
+Before=basic.target shutdown.target
+Conflicts=shutdown.target
+# Self-skip on installs without the recovery layout (e.g. non-btrfs / no /restore)
+# so the unit is harmless everywhere and never blocks boot.
+ConditionPathIsMountPoint=/restore
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/ncde/ncde-snapshot
+# A failed snapshot must never wedge boot.
+SuccessExitStatus=0 1
+TimeoutStartSec=120
+
+[Install]
+WantedBy=basic.target

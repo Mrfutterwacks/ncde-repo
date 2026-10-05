@@ -1,0 +1,12 @@
+#!/bin/sh
+# NCDE fontsync (2026-07-21): the shell (LaPivot) reads/writes the sectioned
+# config ~/.config/ncde/fonts.json, but every standalone house app (Hummingbird,
+# Magpie, Abacus, Verve, NCDE Command) still reads AND file-watches the ncde-wm
+# era ~/.config/ncde/font.json — which nothing had written since 2026-06-21, so
+# Fonts-tab changes never reached the apps. This mirrors fonts.json -> font.json
+# atomically; the apps' own QFileSystemWatcher picks the change up live.
+IN="$HOME/.config/ncde/fonts.json"
+OUT="$HOME/.config/ncde/font.json"
+[ -f "$IN" ] || exit 0
+tmp="$(mktemp "$HOME/.config/ncde/.font.json.XXXXXX")" || exit 1
+cp "$IN" "$tmp" && mv "$tmp" "$OUT"

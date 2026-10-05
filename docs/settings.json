@@ -1,0 +1,30 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/scripts/check_session.sh"
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/scripts/require_search_for_uncertainty.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/scripts/log_command.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

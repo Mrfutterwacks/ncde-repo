@@ -1,0 +1,165 @@
+#!/usr/bin/env python3
+"""cal-reminders — Leap Frog Ledger reminder daemon for NCDE.
+
+Runs once per minute (via systemd timer). Reads ~/.config/ncde/calendar.json,
+expands recurring appointments, and for any whose reminder lead-time falls in
+this minute, delivers via the methods the user enabled:
+  • desktop  → notify-send (or NCDE's NotificationManager if you wire D-Bus)
+  • email    → msmtp  (SMTP creds in ~/.msmtprc, chmod 600)
+  • ntfy     → curl POST https://ntfy.sh/<topic>   (free phone push)
+
+Already-fired reminders are recorded in ~/.config/ncde/calendar.fired so they
+don't repeat. Pure stdlib — no pip installs.
+"""
+
+import json, os, subprocess, datetime, sys, shutil
+
+CFG   = os.environ.get("LEAPFROG_CALENDAR", os.path.expanduser("~/.config/ncde/calendar.json"))
+FIRED = os.environ.get("LEAPFROG_FIRED",    os.path.expanduser("~/.config/ncde/calendar.fired"))
+NOW   = os.environ.get("LEAPFROG_NOW")   # "YYYY-MM-DDTHH:MM" — testing only
+
+def load_json(path, default):
+    try:
+        with open(path) as f: return json.load(f)
+    except Exception:
+        return default
+
+def from_iso(s):
+    y, m, d = (int(x) for x in s.split("-"))
+    return datetime.date(y, m, d)
+
+def add_months(d, n):
+    mo = d.month - 1 + n
+    return d.replace(year=d.year + mo // 12, month=mo % 12 + 1,
+                     day=min(d.day, [31,29 if (d.year%4==0 and (d.year%100!=0 or d.year%400==0)) else 28,
+                                     31,30,31,30,31,31,30,31,30,31][mo % 12]))
+
+def occurs_on(appt, day):
+    """True if appt has an occurrence on `day`. Same rules as cal-logic.js:
+    a monthly on the 31st / a yearly on Feb 29 is SKIPPED where that day doesn't
+    exist (never shifted), so the Ledger and this daemon always agree."""
+    base = from_iso(appt["date"])
+    rep = appt.get("repeat", "none") or "none"
+    if day < base:
+        return False
+    if rep == "none":
+        return day == base
+    if rep == "daily":
+        return True
+    if rep == "weekly":
+        return (day - base).days % 7 == 0
+    if rep == "monthly":
+        return day.day == base.day
+    if rep == "yearly":
+        return (day.month, day.day) == (base.month, base.day)
+    return False
+
+def main():
+    cfg = load_json(CFG, {})
+    settings = cfg.get("settings", {})
+    if not settings.get("enabled", True):
+        return
+    appts = cfg.get("appointments", [])
+    fired_list = load_json(FIRED, [])
+    fired = set(fired_list)
+
+    now = datetime.datetime.fromisoformat(NOW) if NOW else datetime.datetime.now()
+    now = now.replace(second=0, microsecond=0)
+    today = now.date()
+    default_lead = int(settings.get("defaultLead", 15))
+
+    # Work in real datetimes, not minutes-of-today: a "1 day before" reminder
+    # for tomorrow's 10:00 must fire TODAY at 10:00 (2026-09-24 — the old
+    # today-only scan fired it at midnight of the appointment's own day).
+    leads = [default_lead]
+    for a in appts:
+        try: leads.append(int(a["reminder"]))
+        except (KeyError, TypeError, ValueError): pass
+    max_lead = max(leads)
+    horizon = max_lead // 1440 + 1
+
+    new_fired = []
+    for a in appts:
+        # All-day appointments remind on the MORNING OF (9:00 AM, honoring the
+        # lead time) — 2026-07-21, operator: a birthday entered as all-day must
+        # still remind. Timed appointments use their own start as before.
+        try:
+            start_min = 9 * 60 if a.get("allDay") else int(a["start"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        try:
+            lead = default_lead if a.get("reminder") is None else int(a["reminder"])
+        except (TypeError, ValueError):
+            lead = default_lead
+        for off in range(0, horizon + 1):
+            occ = today + datetime.timedelta(days=off)
+            try:
+                if not occurs_on(a, occ):
+                    continue
+            except (KeyError, ValueError, AttributeError):
+                break      # one malformed record must not silence everyone else's
+            start_dt = datetime.datetime.combine(occ, datetime.time()) + datetime.timedelta(minutes=start_min)
+            fire_dt = start_dt - datetime.timedelta(minutes=lead)
+            key = f'{a["id"]}@{occ.isoformat()}@{start_min}'
+            # due once the lead time is reached, until the appointment's first minute
+            # passes (a laptop asleep at fire time still gets it, late but before start)
+            if fire_dt <= now < start_dt + datetime.timedelta(minutes=1) and key not in fired:
+                deliver(a, occ, settings, start_min, today)
+                fired.add(key); new_fired.append(key)
+
+    if new_fired:
+        # keep the fired log from growing unbounded — trim to the most recent
+        # 500 IN ORDER (2026-07-21: trimming a set() kept an arbitrary 500 and
+        # could forget keys fired moments ago -> duplicate reminders)
+        merged = (fired_list + new_fired)[-500:]
+        with open(FIRED, "w") as f: json.dump(merged, f)
+
+def fmt_time(minutes):
+    h, m = divmod(int(minutes), 60)
+    ap = "AM" if h < 12 else "PM"
+    hh = h % 12 or 12
+    return f"{hh}:{m:02d} {ap}"
+
+def deliver(a, occ, settings, start_min, today):
+    title = a.get("title", "Appointment")
+    loc = a.get("location", "")
+    days = (occ - today).days
+    day = "today" if days == 0 else "tomorrow" if days == 1 else occ.strftime("%A %b %-d")
+    when = f"all day {day}" if a.get("allDay") else f"{day} at {fmt_time(start_min)}"
+    body = (f"{loc} · " if loc else "") + when
+    full = f"🐸 {title} — {body}"
+
+    if settings.get("methodDesktop", True):
+        try: subprocess.run(["notify-send", f"🐸 {title}", body], timeout=5)
+        except Exception: pass
+
+    if settings.get("methodNtfy") and settings.get("ntfyTopic"):
+        try:
+            subprocess.run(["curl", "-s", "-d", full,
+                            f'https://ntfy.sh/{settings["ntfyTopic"]}'], timeout=8)
+        except Exception: pass
+
+    if settings.get("methodEmail") and settings.get("email"):
+        to = settings["email"]
+        frm = settings.get("smtpFrom", to)
+        msg = (f"From: Leap Frog Ledger <{frm}>\n"
+               f"To: {to}\nSubject: 🐸 {title}\n\n{body}\n")
+        if shutil.which("msmtp") is None:
+            # The mail agent isn't installed — a chosen delivery method must
+            # never fail into silence: say so on the desk instead.
+            try:
+                subprocess.run(["notify-send", "🐸 Leap Frog Ledger",
+                                "Email reminders need the mail agent (msmtp) — "
+                                "reminder shown here instead: " + full],
+                               timeout=5)
+            except Exception:
+                pass
+        else:
+            try:
+                p = subprocess.Popen(["msmtp", "--", to], stdin=subprocess.PIPE)
+                p.communicate(msg.encode(), timeout=15)
+            except Exception:
+                pass
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,8 @@
+[Unit]
+Description=NCDE rootkit scan (rkhunter) — writes the report Vesper reads
+
+[Service]
+Type=oneshot
+Nice=19
+IOSchedulingClass=idle
+ExecStart=/usr/lib/ncde/vesper/rkhunter-scan.sh

@@ -1,0 +1,24 @@
+[Unit]
+# NCDE System Restore ("Soundings") — live-desktop Ctrl+Alt+R global hotkey.
+# Root cause (2026-09-23): LaPivot (the WM) has no native X11 key grab at all;
+# its QML Keys.onPressed shortcut only fires when LaPivot's own window holds
+# X11 input focus, which it hands off to whatever app is focused
+# (xcb_set_input_focus) — so the shortcut silently did nothing during real
+# desktop use. This is a small standalone companion process that holds its
+# own passive xcb_grab_key on Ctrl+Alt+R (X11 allows any client to grab a
+# combo nothing else has grabbed) and launches the already-working
+# "sudo -n /usr/local/bin/ncde-recovery" on match. Zero changes to LaPivot
+# itself. Source: /usr/share/doc/ncde/ncde-recovery-hotkey.c
+Description=NCDE System Restore — Ctrl+Alt+R global hotkey (live desktop)
+Documentation=file:///usr/share/doc/ncde/NCDE-RECOVERY-APP.md
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/ncde-recovery-hotkey
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

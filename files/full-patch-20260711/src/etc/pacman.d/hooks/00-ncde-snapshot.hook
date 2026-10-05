@@ -1,0 +1,14 @@
+# NCDE fix 2026-07-10 — pre-update Soundings snapshot (commercial.md high-impact
+# item: "pre-update snapshot hook"). PreTransaction, no AbortOnFail: a snapshot
+# failure logs but never blocks the update.
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Operation = Remove
+Type = Package
+Target = *
+
+[Action]
+Description = Soundings: snapshotting system before package changes...
+When = PreTransaction
+Exec = /usr/local/lib/ncde/ncde-snapshot-preupdate

@@ -1,0 +1,4 @@
+#!/bin/bash
+# fnc <Class::name> [file] — decomp function, noise stripped (locals, destructors, stack guard)
+F=${2:-/run/media/stephen/NCDE-BACKUP/my-project/source-recovery/LaPivot/decomp/Lelan.c}
+awk -v n="$1" '/^\/\/ ==== [0-9a-f]+  /{p=($4==n)} p' "$F" | grep -v -E '^\s*$|::~|~Q[A-Za-z]+\(|__stack_chk|in_FS_OFFSET|WARNING: Subroutine|^  [A-Za-z_:<>*, ]+ \*?(local|aQ|p[A-Z]|b|c|i|u|l)[A-Za-z0-9_]*( \[[0-9]+\])?;$|^  (long|char|bool|int|undefined[0-9]*|double|float) [a-zA-Z_0-9]+( \[[0-9]+\])?;$|^\s*\}$|^\{$|^  return;$' | sed -E 's/QArrayDataPointer<char16_t>::QArrayDataPointer\s*\(([^,]*),\(QTypedArrayData \*\)0x0,(L"[^"]*"),[0-9a-fx]+\);/STR \2/'

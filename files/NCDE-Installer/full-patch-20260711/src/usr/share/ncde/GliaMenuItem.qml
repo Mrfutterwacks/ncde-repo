@@ -1,0 +1,236 @@
+// GliaMenuItem.qml — a single row inside a GliaMenuPopup.
+//
+// Sits on PARCHMENT (NCDEParchmentSurface), so text is burgundy ink on ivory
+// and the hover/active state is a burgundy wash with ivory text and a gold-
+// leading edge. Renders one of: a leaded-gold separator rule, or an action
+// row (label + optional shortcut + optional check mark + optional submenu
+// chevron). Nothing flat, nothing sharp.
+//
+// Data shape (see GliaMenuModel.qml):
+//   { label, shortcut, separator, enabled, checkable, checked,
+//     submenu: [ …items… ], actionId }
+import QtQuick
+
+Item {
+    id: gItem
+
+    // NCDE parchment ink + gold leading.
+    readonly property color goldLeading: Qt.rgba(240/255, 210/255, 122/255, 1.0)
+    readonly property color goldSoft: Qt.rgba(240/255, 210/255, 122/255, 0.5)
+    readonly property color gold1:    ncde.gilt0
+    readonly property color gold2:    ncde.gilt1
+    readonly property color burgInk:  ncde.wine1
+    readonly property color burg2:    ncde.wine2
+    readonly property color burg4:    ncde.wine4
+    readonly property color ivory1:   ncde.surface
+
+    // ── API ──────────────────────────────────────────────────────────────
+    property string label:    ""
+    property string shortcut: ""
+    property bool   separator: false
+    property bool   enabled:   true
+    property bool   checkable: false
+    property bool   checked:   false
+    property bool   hasSubmenu: false
+    // Driven by the popup so the row stays lit while its submenu is open.
+    property bool   highlighted: false
+
+    signal activated()                 // user chose this row (leaf action)
+    signal hoveredChanged(bool inside)
+
+    readonly property bool live: !separator && enabled
+    readonly property bool lit:  live && (hov.hovered || highlighted)
+
+    // ── Content-based natural width (INDEPENDENT of `width`) ──────────────
+    // This is what breaks the old Column⇄row binding loop: the card can size
+    // to the widest row without the row's width feeding back into the card.
+    TextMetrics { id: tmLabel; font.family: theme.fontFamily; font.weight: settings.fontWeight; font.italic: settings.fontItalic; font.letterSpacing: theme.letterSpacing; font.pixelSize: theme.fontMedium; text: gItem.label }
+    TextMetrics { id: tmShort; font.family: theme.fontFamily; font.weight: settings.fontWeight; font.italic: settings.fontItalic; font.letterSpacing: theme.letterSpacing; font.pixelSize: theme.fontSmall;  text: gItem.shortcut }
+    readonly property real contentWidth: {
+        var leftPad  = gItem.checkable ? 14 + 16 + 8
+                                       : 18
+        var rightPad = 14
+        var tail     = gItem.hasSubmenu ? 12 + 12
+                     : gItem.shortcut !== "" ? tmShort.width + 20
+                     : 0
+        return leftPad + tmLabel.width + tail + rightPad
+    }
+    implicitWidth: separator ? 140 : Math.ceil(contentWidth)
+    implicitHeight: height
+
+    width: parent ? parent.width : 240
+    height: separator ? 10 : 30
+
+    HoverHandler {
+        id: hov
+        enabled: gItem.live
+        onHoveredChanged: gItem.hoveredChanged(hovered)
+    }
+    TapHandler {
+        enabled: gItem.live && !gItem.hasSubmenu
+        onTapped: gItem.activated()
+    }
+
+    // ── Separator — the leaded gold horizontal line used throughout NCDE ──
+    Loader {
+        active: gItem.separator
+        anchors.fill: parent
+        sourceComponent: Item {
+            Rectangle {
+                anchors.left: parent.left;  anchors.leftMargin:  14
+                anchors.right: parent.right; anchors.rightMargin: 14
+                anchors.verticalCenter: parent.verticalCenter
+                height: 1
+                gradient: Gradient {
+                    orientation: Gradient.Horizontal
+                    GradientStop { position: 0.0; color: "transparent" }
+                    GradientStop { position: 0.5; color: gItem.goldLeading }
+                    GradientStop { position: 1.0; color: "transparent" }
+                }
+            }
+            Rectangle {                                  // soft sheen underneath
+                anchors.left: parent.left;  anchors.leftMargin:  14
+                anchors.right: parent.right; anchors.rightMargin: 14
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.verticalCenterOffset: 1
+                height: 1; opacity: 0.4
+                gradient: Gradient {
+                    orientation: Gradient.Horizontal
+                    GradientStop { position: 0.0; color: "transparent" }
+                    GradientStop { position: 0.5; color: gItem.goldSoft }
+                    GradientStop { position: 1.0; color: "transparent" }
+                }
+            }
+            Rectangle {                                  // center cabochon bead
+                anchors.centerIn: parent
+                width: 4; height: 4; radius: width / 2
+                color: gItem.goldLeading
+            }
+        }
+    }
+
+    // ── Action row ──────────────────────────────────────────────────────────
+    Loader {
+        active: !gItem.separator
+        anchors.fill: parent
+        sourceComponent: Item {
+
+            // burgundy hover/highlight wash — rounded, never sharp
+            Rectangle {
+                id: rowBg
+                anchors.fill: parent
+                anchors.leftMargin:  4
+                anchors.rightMargin: 4
+                anchors.topMargin:   1
+                anchors.bottomMargin: 1
+                radius: 9
+                opacity: gItem.lit ? 1 : 0
+                Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: gItem.burg4 }
+                    GradientStop { position: 1.0; color: gItem.burg2 }
+                }
+                border.width: 1
+                border.color: gItem.goldLeading
+                // gold leading on the leading (left) edge
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    anchors.margins: 3
+                    width: 2; radius: 1
+                    color: gItem.goldLeading
+                }
+            }
+
+            // check / radio glyph slot
+            Item {
+                id: markSlot
+                anchors.left: parent.left
+                anchors.leftMargin: 14
+                anchors.verticalCenter: parent.verticalCenter
+                width: 16; height: 16
+                visible: gItem.checkable
+                Canvas {
+                    id: checkCanvas
+                    anchors.fill: parent
+                    renderStrategy: Canvas.Cooperative
+                    // `parent` inside Connections is NOT the Canvas (it threw "requestPaint is not a function"); call it by id (2026-09-24)
+                    Connections { target: gItem; function onCheckedChanged() { checkCanvas.requestPaint() }
+                                                 function onLitChanged()     { checkCanvas.requestPaint() } }
+                    onPaint: {
+                        var ctx = getContext("2d"); ctx.clearRect(0, 0, width, height)
+                        if (!gItem.checked) return
+                        ctx.strokeStyle = gItem.lit ? gItem.goldLeading : "rgba(240,210,122,0.55)"
+                        ctx.lineWidth = 2; ctx.lineCap = "round"; ctx.lineJoin = "round"
+                        ctx.beginPath()
+                        ctx.moveTo(width * 0.16, height * 0.52)
+                        ctx.lineTo(width * 0.42, height * 0.78)
+                        ctx.lineTo(width * 0.88, height * 0.20)
+                        ctx.stroke()
+                    }
+                }
+            }
+
+            // label
+            Text {
+                id: labelText
+                anchors.left: gItem.checkable ? markSlot.right : parent.left
+                anchors.leftMargin: gItem.checkable ? 8 : 18
+                anchors.right: tail.left
+                anchors.rightMargin: 10
+                anchors.verticalCenter: parent.verticalCenter
+                text: gItem.label
+                elide: Text.ElideRight
+                color: WallInk.inked(!gItem.enabled ? Qt.rgba(1, 1, 1, 0.28)
+                     :  gItem.lit     ? gItem.ivory1
+                     :                  ncde.panelText)
+                font.family: theme.fontFamily; font.weight: settings.fontWeight; font.italic: settings.fontItalic; font.letterSpacing: theme.letterSpacing
+                font.pixelSize: theme.fontMedium
+            }
+
+            // trailing: shortcut text OR submenu chevron
+            Item {
+                id: tail
+                anchors.right: parent.right
+                anchors.rightMargin: 14
+                anchors.verticalCenter: parent.verticalCenter
+                width: gItem.hasSubmenu ? 12
+                     : shortcutText.visible ? shortcutText.implicitWidth
+                     : 0
+                height: parent.height
+
+                Text {
+                    id: shortcutText
+                    visible: !gItem.hasSubmenu && gItem.shortcut !== ""
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: gItem.shortcut
+                    color: WallInk.inked(gItem.lit ? gItem.goldLeading : Qt.rgba(240/255, 210/255, 122/255, 0.55))
+                    opacity: gItem.enabled ? 1.0 : 0.35
+                    font.family: theme.fontFamily; font.weight: settings.fontWeight; font.italic: settings.fontItalic
+                    font.pixelSize: theme.fontSmall
+                    font.letterSpacing: 1
+                }
+
+                Canvas {
+                    id: submenuArrowCanvas
+                    visible: gItem.hasSubmenu
+                    anchors.fill: parent
+                    renderStrategy: Canvas.Cooperative
+                    Connections { target: gItem; function onLitChanged() { submenuArrowCanvas.requestPaint() } }   // by id, not `parent` (2026-09-24)
+                    onPaint: {
+                        var ctx = getContext("2d"); ctx.clearRect(0, 0, width, height)
+                        ctx.fillStyle = gItem.lit ? gItem.goldLeading : "rgba(240,210,122,0.55)"
+                        var cx = width - 2, cy = height / 2
+                        ctx.beginPath()
+                        ctx.moveTo(cx - 5, cy - 4)
+                        ctx.lineTo(cx, cy)
+                        ctx.lineTo(cx - 5, cy + 4)
+                        ctx.closePath(); ctx.fill()
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,30 @@
+[Unit]
+Description=NCDE USB auto-mount (honors StorageTab autoMountUsb -> udisksctl mount)
+# Enforces the StorageTab "Auto-mount USB on insertion" toggle that the stripped
+# Lelan binary never acted on (gap G9). Pure userspace: udev watch + udisksctl.
+# Nothing near ncde-portal / logind / LaPivot.
+Documentation=file:/usr/share/ncde/StorageTab.qml
+# Needs the active graphical session: udisks' polkit filesystem-mount rule is
+# allow_active, so mounting only works for the logged-in seat's session.
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/ncde-automount
+# The udev monitor or udisks may be briefly unavailable; the daemon retries
+# internally, but if it ever exits, bring it straight back.
+Restart=always
+RestartSec=3
+# Keep it lightweight and out of the way.
+Nice=5
+# Hardening: it only reads /proc, /sys and ~/.config/ncde/storage.json, and runs
+# udevadm / udisksctl (which talk to the system daemons over D-Bus). It writes
+# nothing and needs no elevated privileges of its own.
+NoNewPrivileges=yes
+ProtectHome=read-only
+ProtectSystem=strict
+PrivateTmp=yes
+
+[Install]
+WantedBy=graphical-session.target

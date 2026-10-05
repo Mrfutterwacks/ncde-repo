@@ -1,0 +1,12 @@
+#!/bin/bash
+# ncde-update-notify — count pending updates and tell the user once a day.
+# Quiet on no-updates or any error (checkupdates rc: 0=list, 2=none, other=error).
+command -v checkupdates >/dev/null 2>&1 || exit 0
+command -v notify-send  >/dev/null 2>&1 || exit 0
+out=$(checkupdates 2>/dev/null); rc=$?
+[ "$rc" -eq 0 ] || exit 0
+n=$(printf '%s\n' "$out" | grep -c .)
+[ "$n" -gt 0 ] || exit 0
+s=""; [ "$n" -ne 1 ] && s="s"
+notify-send -a "NCDE" -i system-software-update -u normal \
+    "Updates available" "$n package$s can be updated. Open NCDE Command to install."

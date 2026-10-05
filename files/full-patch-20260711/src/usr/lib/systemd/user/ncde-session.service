@@ -1,0 +1,37 @@
+[Unit]
+Description=NCDE session save/restore (relaunch the user's apps across logout)
+Documentation=file:/usr/share/ncde/ncde-session.README.md
+# Runs inside the graphical user session: save needs $DISPLAY to read X11.
+#
+# ZERO window-manager modification. This unit only drives the standalone
+# /usr/local/bin/ncde-session helper, which READS X11 + /proc and WRITES its own
+# JSON. It never touches LaPivot, the panels, ncde-x11-session, ncde-portal,
+# logind, or any other live unit.
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+# oneshot + RemainAfterExit is the whole trick:
+#   * ExecStart runs once at login  -> restore the previous session.
+#   * the unit then stays "active (exited)" for the life of the session.
+#   * ExecStop runs when the unit is stopped, which happens when the user
+#     session (default.target / graphical-session.target) stops on LOGOUT
+#     -> save the current session.
+# We are ordered After=graphical-session.target, so on shutdown systemd stops
+# THIS unit before the target unbinds; the display is still up when save runs.
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/ncde-session restore
+ExecStop=/usr/local/bin/ncde-session save
+# The helper already guarantees exit 0 in every path, but make doubly sure a
+# hiccup can never wedge login or logout.
+SuccessExitStatus=0 1
+TimeoutStartSec=30
+TimeoutStopSec=20
+Nice=5
+# Restore/save launch or inspect real user apps, so keep the real session
+# environment ($HOME, $DISPLAY, dbus). Only light, self-contained hardening.
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target

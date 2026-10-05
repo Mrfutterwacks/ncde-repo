@@ -1,0 +1,34 @@
+[Unit]
+Description=NCDE news-headline notifier (NPR RSS -> clickable native notification)
+# Rides the native org.freedesktop.Notifications server the NCDE notify companion
+# provides. Pure userspace: fetches a free public RSS feed and raises a clickable
+# notification; on activation it opens the article in ncde-chromium. Nothing near
+# LaPivot / ncde-portal / logind.
+#
+# SHIPPED DISABLED. This unit file is installed but NOT symlinked into
+# default.target.wants, so it does not run until the user opts in. The helper
+# ALSO self-gates on NCDE_NEWS_ENABLE / news.conf and exits 0 when not enabled,
+# so even a manually-started copy stays quiet until opted in.
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+# Enabling this unit IS the opt-in (as the comments above promise). Without this
+# line a user who ran `systemctl --user enable --now ncde-news` still got silence:
+# the helper's own env/conf gate found nothing and exited 0 — the documented
+# single switch was a lie. news.env below still overrides for per-user tuning.
+Environment=NCDE_NEWS_ENABLE=1
+# Optional per-user opt-in + tunables (env form). '-' => fine if the file is absent.
+EnvironmentFile=-%h/.config/ncde/news.env
+ExecStart=/usr/local/bin/ncde-news
+Restart=on-failure
+RestartSec=30
+Nice=10
+# Deliberately NOT sandboxed (no ProtectHome/PrivateTmp/ProtectSystem): on
+# activation this launches the user's themed browser, which needs the real
+# session environment ($HOME, display, dbus). All network/parse work is already
+# guarded inside the helper itself.
+
+[Install]
+WantedBy=default.target

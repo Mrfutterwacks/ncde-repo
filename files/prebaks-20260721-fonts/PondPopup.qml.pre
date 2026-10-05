@@ -1,0 +1,151 @@
+// PondPopup.qml — tiny parchment popup for the Pond's two note actions:
+//   mode "stock" → a TextInput to jot a lily-pad note (pond.addNote)
+//   mode "tally" → reads pond.tally() and shows the counts
+// Pure QtQuick primitives (TextInput, not QtQuick.Controls). picom-safe window.
+//
+//   PondPopup { id: pondPopup; pond: pond }
+//   ... pondPopup.openStock()   /   pondPopup.openTally()
+import QtQuick
+
+Window {
+    id: win
+    flags: Qt.FramelessWindowHint | Qt.BypassWindowManagerHint | Qt.WindowStaysOnTopHint
+    color: "transparent"
+    width:  420
+    height: 232
+    x: Math.round((Screen.width  - width)  / 2)
+    y: Math.round((Screen.height - height) / 2)
+    visible: false
+
+    property var    pond: null
+    property string mode: "stock"     // "stock" | "tally"
+
+    NCDEKit { id: k }
+    readonly property color gold1: k.gilt0
+    readonly property color gold2: k.gilt1
+    readonly property color goldLeading: Qt.rgba(240/255,210/255,122/255,1)
+    readonly property color burg2: k.wine2
+    readonly property color burg4: k.wine4
+    readonly property color ink:   k.ink
+
+    property var tallyData: ({})
+
+    function openStock() { mode = "stock"; visible = true; raise(); noteField.text = ""; noteField.forceActiveFocus() }
+    function openTally() { mode = "tally"; tallyData = pond ? pond.tally() : ({}); visible = true; raise() }
+    function hide() { visible = false }
+    function commit() {
+        var t = noteField.text.trim()
+        if (t.length > 0 && pond) pond.addNote(t)
+        hide()
+    }
+
+    opacity: 0
+    Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+    onVisibleChanged: opacity = visible ? 1 : 0
+
+    Item {
+        anchors.fill: parent
+        scale: win.opacity < 1 ? 0.98 : 1.0
+        transformOrigin: Item.Center
+        Behavior on scale { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+
+        NCDEParchmentSurface { anchors.fill: parent; cornerRadius: 14 }
+
+        Column {
+            anchors.fill: parent
+            anchors.margins: 26
+            spacing: 14
+
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: win.mode === "stock" ? "Stock the Pond" : "Tally the Lily Pads"
+                color: win.burg2; font.family: theme.titleFont; font.bold: true
+                font.pixelSize: theme.fontMedium + theme.scale(8)
+            }
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: win.mode === "stock" ? "Set a lily pad upon the water — a note to keep."
+                                           : "What floats upon the pond today."
+                color: win.gold1; font.family: theme.fontFamily; font.italic: true
+                font.pixelSize: theme.fontSmall + theme.scale(1)
+            }
+
+            // ── stock: note input (always present; shown in stock mode) ──
+            Rectangle {
+                visible: win.mode === "stock"
+                width: parent.width; height: 44; radius: 8
+                color: Qt.rgba(1, 0.99, 0.95, 0.85)
+                border.width: 1.5; border.color: win.gold2
+                TextInput {
+                    id: noteField
+                    anchors.fill: parent
+                    anchors.leftMargin: 12; anchors.rightMargin: 12
+                    verticalAlignment: TextInput.AlignVCenter
+                    color: win.ink; font.family: theme.fontFamily; font.pixelSize: theme.fontMedium + theme.scale(2)
+                    clip: true; selectByMouse: true
+                    onAccepted: win.commit()
+                    Text {
+                        anchors.fill: parent; verticalAlignment: Text.AlignVCenter
+                        visible: noteField.text.length === 0
+                        text: "a thought to keep…"; color: Qt.rgba(0.35,0.27,0.12,0.5)
+                        font: noteField.font
+                    }
+                }
+            }
+
+            // ── tally: readout ──
+            Column {
+                visible: win.mode === "tally"
+                width: parent.width; spacing: 8
+                Row { spacing: 10
+                    Text { text: "🪷"; font.pixelSize: theme.fontMedium + theme.scale(6) }
+                    Text { text: (win.tallyData.lilyPads !== undefined ? win.tallyData.lilyPads : 0)
+                                 + " lily pad" + (win.tallyData.lilyPads === 1 ? "" : "s") + " upon the pond"
+                           color: win.ink; font.family: theme.fontFamily; font.pixelSize: theme.fontMedium + theme.scale(3)
+                           anchors.verticalCenter: parent.verticalCenter }
+                }
+                Text { text: "· " + (win.tallyData.today !== undefined ? win.tallyData.today : 0) + " set today"
+                       color: win.gold1; font.family: theme.fontFamily; font.italic: true; font.pixelSize: theme.fontMedium }
+                Text { text: "· " + (win.tallyData.appointments !== undefined ? win.tallyData.appointments : 0) + " appointments on the calendar"
+                       color: win.gold1; font.family: theme.fontFamily; font.italic: true; font.pixelSize: theme.fontMedium }
+            }
+
+            // action button (stock only)
+            Rectangle {
+                visible: win.mode === "stock"
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: 150; height: 36; radius: height/2
+                color: btnHov.hovered ? win.goldLeading : Qt.rgba(240/255,210/255,122/255,0.22)
+                border.width: 1.5; border.color: win.gold2
+                Text { anchors.centerIn: parent; text: "SET LILY PAD"; color: win.burg4
+                       font.family: theme.titleFont; font.letterSpacing: 1.5; font.pixelSize: theme.fontSmall }
+                HoverHandler { id: btnHov }
+                TapHandler { onTapped: win.commit() }
+            }
+        }
+
+        // close jewel
+        Item {
+            width: 28; height: 28
+            anchors.top: parent.top; anchors.right: parent.right
+            anchors.topMargin: 12; anchors.rightMargin: 14
+            Canvas {
+                anchors.fill: parent; renderStrategy: Canvas.Cooperative
+                property bool hov: ch.hovered
+                onHovChanged: requestPaint()
+                onPaint: {
+                    var ctx = getContext("2d"); ctx.reset()
+                    var cx = width/2, cy = height/2, r = width/2 - 2
+                    ctx.beginPath(); ctx.moveTo(cx,cy-r); ctx.lineTo(cx+r,cy); ctx.lineTo(cx,cy+r); ctx.lineTo(cx-r,cy); ctx.closePath()
+                    ctx.fillStyle = hov ? ncde.wine4 : ncde.wine2; ctx.fill()
+                    ctx.strokeStyle = hov ? ncde.gilt4 : ncde.gilt3; ctx.lineWidth = 1.4; ctx.stroke()
+                    ctx.strokeStyle = ncde.surface; ctx.lineWidth = 1.7; ctx.lineCap = "round"
+                    var d = r*0.42
+                    ctx.beginPath(); ctx.moveTo(cx-d,cy-d); ctx.lineTo(cx+d,cy+d); ctx.moveTo(cx+d,cy-d); ctx.lineTo(cx-d,cy+d); ctx.stroke()
+                }
+            }
+            HoverHandler { id: ch }
+            TapHandler { onTapped: win.hide() }
+        }
+    }
+}

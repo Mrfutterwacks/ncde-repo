@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Hidden App
+Exec=record-app hidden
+Categories=Utility;
+Hidden=true

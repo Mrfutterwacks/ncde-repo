@@ -1,0 +1,9 @@
+[Trigger]
+Operation = Upgrade
+Type = Package
+Target = ncde
+
+[Action]
+Description = Soundings snapshot before updating NCDE...
+When = PreTransaction
+Exec = /usr/lib/ncde-update/ncde-snapshot

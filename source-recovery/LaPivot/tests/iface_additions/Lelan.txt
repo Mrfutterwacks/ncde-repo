@@ -1,0 +1,38 @@
+# Settings > About system facts (Sentinel GetSystemInfo). settings-tabs.md: needs C++. 2026-09-30.
+    Q_PROPERTY(QVariantMap systemInfo READ ? NOTIFY systemInfoChanged)
+    signal:     public void systemInfoChanged();
+# Settings > Network cable panel (N11): NetworkTab showed Wi-Fi state/IP under "Ethernet". 2026-09-30.
+    Q_PROPERTY(QVariantMap wiredNetwork READ ? NOTIFY networkChanged)
+# Settings > Network: a failed Wi-Fi join was only a log line (N8). 2026-09-30.
+    signal:     public void wifiConnectFailed(QString ssid, QString reason);
+# Settings > Network: VPN import (N12; the nmtui "Add VPN" entry was dead and hidden). 2026-09-30.
+    signal:     public void vpnImportFinished(bool ok, QString message);
+    Q_INVOKABLE public void importVpn(QString file);
+# Settings > Network: remove a VPN (the nmtui "Edit..." button was dead and hidden). 2026-09-30.
+    Q_INVOKABLE public void removeVpn(QString name);
+# Settings > Bluetooth: scan state (B3: discovery now stops by itself). 2026-09-30.
+    Q_PROPERTY(bool bluetoothScanning READ ? NOTIFY bluetoothChanged)
+# Settings > Bluetooth pairing (B4: no agent existed; OPEN-ITEMS "register org.bluez.Agent1 in Lelan"). 2026-09-30.
+    Q_PROPERTY(QVariantMap bluetoothPairing READ ? NOTIFY bluetoothPairingChanged)
+    signal:     public void bluetoothPairingChanged();
+    Q_INVOKABLE public void bluetoothPairingReply(bool accept, QString value);
+# Settings > Bluetooth: failures were silent (B6). 2026-09-30.
+    signal:     public void bluetoothFailed(QString address, QString reason);
+# Settings > Storage: eject = safe to remove (S2), unlock encrypted sticks (S6), failures (S1). 2026-09-30.
+    Q_INVOKABLE public void ejectVolume(QString path);
+    Q_INVOKABLE public void unlockVolume(QString path, QString passphrase);
+    signal:     public void volumeFailed(QString path, QString reason);
+    signal:     public void volumeEjected(QString label);
+# Settings > Storage: auto-mount on insertion moved into Lelan from the ncde-automount daemon (S7). 2026-09-30.
+    slot:       public void setAutoMountPref(bool on);
+# Settings > Power "When the lid closes" (logind ignores the lid; nothing acted on it). 2026-09-30.
+    Q_PROPERTY(bool lidClosed READ ? NOTIFY lidClosedChanged)
+    signal:     public void lidClosedChanged(bool closed);
+# Settings > Privacy "Location" (Settings::locationEnabled): off = GeoClue stopped, coordinates dropped (T8).
+    slot:       public void setLocationAllowed(bool on);
+# Settings > Input: a mouse/touchpad plugged after login must get configured speed/accel (Settings::applyInput).
+    signal:     public void inputDevicesChanged();
+# AccountsService users listing and create/delete notifications used by the rebuilt UsersTab backend.
+    slot:       private void onAccountsPropertiesChanged(QString iface, QVariantMap changed, QStringList inval);
+    slot:       private void onAccountsUserAdded(QDBusObjectPath path);
+    slot:       private void onAccountsUserDeleted(QDBusObjectPath path);

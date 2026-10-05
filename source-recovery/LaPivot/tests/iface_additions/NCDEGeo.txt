@@ -1,0 +1,15 @@
+# NCDEGeo additions — measured defects fixed 2026-10-01.
+# G1: zone() was a copy/paste of tzName() — both returned the same string. QML documents
+#     three different things: zone = IANA id, tzName = display name, offset = UTC±HH:MM.
+#     Fixed: zone() = IANA id; tzName() = QTimeZone.displayName(LongName, now).
+# G2: offset() returned empty string for unknown/invalid IANA id — blank on any machine
+#     before GeoClue's first fix. Fixed: fall back to system local offset; "UTC" only if unavailable.
+# G3: localTime() hard-coded "h:mm AP" (12-hour) for every machine, ignoring Settings::hourFormat.
+#     Fixed: setHourFormatPref() wired from main(); "auto" resolves via locale.
+# G4: offset() built QTimeZone from scratch on every property READ — 8 bindings in
+#     NCDEGeoChart, once/second on pulse. Fixed: parse once per call, not per binding.
+# G5: setLelan() could be called twice and connected signals twice → changed() emitted twice,
+#     and destroyed Lelan left dangling pointer. Fixed: idempotent setLelan (old connections
+#     dropped, same pointer = no-op) + destroyed() watcher clears pointer.
+
+    Q_INVOKABLE public void publish();

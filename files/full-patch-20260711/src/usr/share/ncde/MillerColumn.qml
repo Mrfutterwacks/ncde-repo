@@ -1,0 +1,430 @@
+// MillerColumn.qml — one column of Orchidée's Miller (Finder) column view.
+//
+// Lists a directory (via OrchideeFiles.entries). Selecting a folder asks the
+// parent to spawn the next column; selecting a file shows it as the leaf. Pure
+// QtQuick primitives + TapHandler/HoverHandler — no QtQuick.Controls.
+//
+// Drag-and-drop (2026-07-06, operator: "you need to be able to drag files" —
+// Thunar model): every row is a drag source (a parchment ghost pill follows the
+// cursor); every FOLDER row is a drop target, and the column background accepts
+// drops into this column's own directory. The move itself is the real backend
+// orchidee.moveTo() (rename, cross-device copy+delete fallback).
+import QtQuick 2.15
+import "ncde-color.js" as Col
+import QtQuick.Window 2.15
+
+Item {
+    id: col
+    property string dirPath: ""
+    property int    depth: 0
+    property string selectedPath: ""     // which row here is selected (drives next column)
+
+    signal openDir(string path, int depth)     // a folder was chosen → next column
+    signal pickFile(string path, int depth)     // a file was chosen → leaf preview
+    signal acted(string kind)                    // tell Glia to react
+    signal addToDock(string path)
+    signal removeFromDock(string path)
+    signal moveRequested(string path)
+    signal moved(string name)                    // a drag-drop move landed here
+    // 2026-07-07 UX pack — context-menu verbs handled by OrchideeApp
+    signal renameRequested(string path)
+    signal cutRequested(string path)
+    signal copyRequested(string path)
+    signal tossRequested(string path)
+    // cut/copy → paste into another folder (2026-09-24): Paste lives in the
+    // right-click menu, on a folder ("Paste Into Folder") or on empty space.
+    signal pasteRequested(string destDir)
+    property bool canPaste: false        // bound from OrchideeApp: something is on the tray
+    property bool menuIsDir: false
+
+    // shared drop guard: never move onto itself, into the folder it already
+    // lives in, or a folder into its own descendant
+    function dropOk(src, destDir) {
+        if (!src || !src.dragPath || src.dragPath === destDir) return false
+        if (orchidee.parentOf(src.dragPath) === destDir) return false
+        if (src.dragIsDir && (destDir + "/").indexOf(src.dragPath + "/") === 0) return false
+        return true
+    }
+
+    width: 220
+
+    NCDEKit { id: k }
+    // menu text on the cream card: palette ink pushed to 7:1 against it
+    // (dark palettes gave cream-on-cream, unreadable — 2026-09-24)
+    readonly property color menuInk: Col.readable(k.ink, k.surfaceHi, 7.0)
+    // right-click on empty space (no tile under the pointer) → Paste here
+    TapHandler {
+        acceptedButtons: Qt.RightButton
+        onTapped: (eventPoint) => {
+            var lp = lv.mapFromItem(null, eventPoint.scenePosition.x, eventPoint.scenePosition.y)
+            if (lv.indexAt(lp.x + lv.contentX, lp.y + lv.contentY) !== -1 || !col.canPaste) return
+            var p = col.mapFromItem(null, eventPoint.scenePosition.x, eventPoint.scenePosition.y)
+            col.openDockMenu("", p.x, p.y)
+        }
+    }
+    readonly property color gold:   Qt.rgba(240/255,210/255,122/255,1)
+    readonly property color goldDeep: k.gilt1
+    readonly property color ink:    k.ink
+    readonly property color burg4:  k.wine4
+    readonly property color cream:  k.surfaceHi
+
+    property bool showHidden: false      // bound from OrchideeApp (Ctrl+H)
+    onShowHiddenChanged: reload()
+    property var rows: []
+    function reload() {
+        rows = orchidee.entries(dirPath, showHidden).slice().sort(function(a, b) {
+            // Thunar order: folders first, then names A→Z ignoring case
+            if (a.isDir !== b.isDir) return a.isDir ? -1 : 1
+            return a.name.toLowerCase().localeCompare(b.name.toLowerCase())
+        })
+    }
+    Component.onCompleted: reload()
+    Connections {
+        target: orchidee
+        function onChanged(p) { if (p === col.dirPath) col.reload(); }
+    }
+
+    // column divider
+    Rectangle { anchors.right: parent.right; width: 1; height: parent.height; color: col.goldDeep; opacity: 0.4 }
+
+    // drop on the column's open space = move into THIS column's directory
+    // (folder rows below sit deeper in the item tree, so they win when hovered)
+    DropArea {
+        anchors.fill: parent
+        onDropped: {
+            // a bin item dragged out → restore it INTO this column's directory
+            if (drag.source && drag.source.dragBinName) {
+                if (binnieTrash.restoreTo(drag.source.dragBinName, col.dirPath))
+                    col.moved(drag.source.dragBinName)
+                return
+            }
+            if (!col.dropOk(drag.source, col.dirPath)) return
+            var nm = orchidee.baseName(drag.source.dragPath)
+            if (orchidee.moveTo(drag.source.dragPath, col.dirPath)) col.moved(nm)
+        }
+    }
+
+    ListView {
+        id: lv
+        anchors.fill: parent
+        anchors.rightMargin: 1
+        clip: true
+        model: col.rows
+        boundsBehavior: Flickable.StopAtBounds
+        delegate: Item {
+            id: rowItem
+            width: lv.width; height: 30
+            readonly property bool sel: modelData.path === col.selectedPath
+            Rectangle {
+                anchors.fill: parent; anchors.margins: 2
+                radius: 7
+                color: sel ? Qt.rgba(139/255,30/255,63/255,0.85)
+                           : (hov.hovered ? Qt.rgba(139/255,30/255,63/255,0.08) : "transparent")
+                border.width: rowDrop.enabled && rowDrop.containsDrag ? 2 : 0
+                border.color: col.gold
+            }
+            // folders catch dragged items (Thunar move)
+            DropArea {
+                id: rowDrop
+                anchors.fill: parent
+                enabled: modelData.isDir === true
+                onDropped: {
+                    // a bin item dragged out → restore it INTO this folder
+                    if (drag.source && drag.source.dragBinName) {
+                        if (binnieTrash.restoreTo(drag.source.dragBinName, modelData.path))
+                            col.moved(drag.source.dragBinName)
+                        return
+                    }
+                    if (!col.dropOk(drag.source, modelData.path)) return
+                    var nm = orchidee.baseName(drag.source.dragPath)
+                    if (orchidee.moveTo(drag.source.dragPath, modelData.path)) col.moved(nm)
+                }
+            }
+            // drag ghost — a parchment pill floating above the whole window
+            Item {
+                id: dragProxy
+                parent: rowItem.Window.window ? rowItem.Window.window.contentItem : rowItem
+                z: 5000
+                width: 170; height: 30
+                visible: dragH.active
+                Drag.active: dragH.active
+                Drag.hotSpot: Qt.point(width / 2, height / 2)
+                property string dragPath: modelData.path
+                property bool   dragIsDir: modelData.isDir === true
+                Rectangle {
+                    anchors.fill: parent; radius: 7
+                    color: col.cream; border.color: col.goldDeep; border.width: 1.5
+                    opacity: 0.94
+                    Row {
+                        anchors.fill: parent; anchors.leftMargin: 9
+                        spacing: 6
+                        Text { anchors.verticalCenter: parent.verticalCenter
+                               text: modelData.isDir ? "▸" : col.glyph(modelData.kind)
+                               color: col.goldDeep; font.pixelSize: theme.fontSmall }
+                        Text { anchors.verticalCenter: parent.verticalCenter
+                               width: parent.width - 34; elide: Text.ElideRight
+                               text: modelData.name; color: col.ink
+                               font.family: theme.fontFamily; font.weight: settings.fontWeight; font.italic: settings.fontItalic; font.letterSpacing: theme.letterSpacing; font.pixelSize: theme.fontSmall }
+                    }
+                }
+            }
+            DragHandler {
+                id: dragH
+                target: dragProxy
+                onActiveChanged: {
+                    if (active) {
+                        var sp = centroid.scenePosition
+                        dragProxy.x = sp.x - dragProxy.width / 2
+                        dragProxy.y = sp.y - dragProxy.height / 2
+                    } else {
+                        dragProxy.Drag.drop()
+                    }
+                }
+            }
+            Row {
+                anchors.fill: parent
+                anchors.leftMargin: 10; anchors.rightMargin: 6
+                spacing: 8
+                Text {                          // kind glyph
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: modelData.isDir ? "\u25b8" : glyph(modelData.kind)
+                    color: sel ? col.cream : col.goldDeep
+                    font.pixelSize: theme.fontSmall
+                }
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: parent.width - 54; elide: Text.ElideRight
+                    text: modelData.name
+                    color: sel ? col.cream : col.ink
+                    font.family: theme.fontFamily; font.weight: settings.fontWeight; font.italic: settings.fontItalic; font.letterSpacing: theme.letterSpacing; font.pixelSize: theme.fontMedium
+                }
+            }
+            Text {                              // folder chevron
+                visible: modelData.isDir
+                anchors.right: parent.right; anchors.rightMargin: 8
+                anchors.verticalCenter: parent.verticalCenter
+                text: "\u203a"; color: sel ? col.cream : col.goldDeep
+                font.pixelSize: theme.fontMedium
+            }
+            HoverHandler { id: hov }
+            TapHandler {
+                onTapped: {
+                    col.selectedPath = modelData.path
+                    if (modelData.isDir) { col.openDir(modelData.path, col.depth); col.acted("open") }
+                    else                 { col.pickFile(modelData.path, col.depth); col.acted("select") }
+                }
+            }
+            TapHandler {
+                acceptedButtons: Qt.RightButton
+                onTapped: (eventPoint) => {
+                    var p = col.mapFromItem(null, eventPoint.scenePosition.x, eventPoint.scenePosition.y)
+                    col.openDockMenu(modelData.path, p.x, p.y)
+                }
+            }
+        }
+    }
+
+    // ── Shared right-click menu (one per column, drawn above the rows) ──────
+    //  Pure QtQuick parchment popup. Opened by a row's right-click TapHandler
+    //  via openDockMenu(path,x,y); its one row re-uses the existing addToDock
+    //  signal so OrchideeApp's handler + the C++ writer stay untouched.
+    property string menuPath: ""
+    function openDockMenu(path, x, y) {
+        col.menuPath = path
+        col.menuIsDir = false
+        for (var i = 0; i < col.rows.length; i++)
+            if (col.rows[i].path === path) { col.menuIsDir = col.rows[i].isDir === true; break }
+        dockMenu.x = Math.max(2, Math.min(x, col.width  - dockMenu.width  - 2))
+        dockMenu.y = Math.max(2, Math.min(y, col.height - dockMenu.height - 2))
+        dockMenu.visible = true
+    }
+    function closeDockMenu() { dockMenu.visible = false; col.menuPath = "" }
+
+    // full-column dismiss layer — left-click outside the menu closes it
+    Item {
+        anchors.fill: parent
+        visible: dockMenu.visible
+        z: 1999
+        TapHandler { acceptedButtons: Qt.LeftButton; onTapped: col.closeDockMenu() }
+    }
+
+    Rectangle {
+        id: dockMenu
+        visible: false
+        z: 2000
+        width: 188
+        height: menuCol.implicitHeight + 8
+        radius: 8
+        color: col.cream
+        border.color: col.goldDeep
+        border.width: 1
+
+        property bool menuIsDesktop: col.menuPath.endsWith(".desktop")
+
+        Rectangle {
+            anchors.fill: parent
+            anchors.topMargin: 2; anchors.leftMargin: 2
+            z: -1; radius: parent.radius
+            color: Qt.rgba(0, 0, 0, 0.28)
+        }
+
+        Column {
+            id: menuCol
+            x: 4; y: 4
+            width: parent.width - 8
+            spacing: 0
+
+            // Move To… — always visible
+            Item {
+                visible: col.menuPath !== ""
+                width: parent.width; height: 28
+                Rectangle {
+                    anchors.fill: parent; radius: 6
+                    color: moveToHov.hovered ? Qt.rgba(139/255, 30/255, 63/255, 0.85) : "transparent"
+                }
+                Rectangle {
+                    visible: moveToHov.hovered
+                    anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom
+                    anchors.margins: 3
+                    width: 2; radius: 1; color: col.gold
+                }
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.left: parent.left; anchors.leftMargin: 12
+                    text: "Move To…"
+                    color: moveToHov.hovered ? col.cream : col.menuInk
+                    font.family: theme.fontFamily; font.weight: settings.fontWeight; font.italic: settings.fontItalic; font.letterSpacing: theme.letterSpacing; font.pixelSize: theme.fontMedium
+                }
+                HoverHandler { id: moveToHov }
+                TapHandler {
+                    onTapped: {
+                        var path = col.menuPath
+                        col.closeDockMenu()
+                        if (path !== "") col.moveRequested(path)
+                    }
+                }
+            }
+
+            // 2026-07-07 UX pack — Rename / Cut / Copy / Toss (Thunar-class verbs)
+            Repeater {
+                model: [
+                    { label: "Rename…",     sig: "rename" },
+                    { label: "Cut",         sig: "cut" },
+                    { label: "Copy",        sig: "copy" },
+                    { label: "Toss to Bin", sig: "toss" },
+                    { label: "Paste",       sig: "paste" }
+                ]
+                Item {
+                    visible: modelData.sig === "paste" ? col.canPaste : col.menuPath !== ""
+                    width: parent.width; height: 28
+                    Rectangle {
+                        anchors.fill: parent; radius: 6
+                        color: mxCtxHov.hovered ? Qt.rgba(139/255, 30/255, 63/255, 0.85) : "transparent"
+                    }
+                    Rectangle {
+                        visible: mxCtxHov.hovered
+                        anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom
+                        anchors.margins: 3; width: 2; radius: 1; color: col.gold
+                    }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.left: parent.left; anchors.leftMargin: 12
+                        text: modelData.sig === "paste" && col.menuIsDir ? "Paste Into Folder" : modelData.label
+                        color: mxCtxHov.hovered ? col.cream : col.menuInk
+                        font.family: theme.fontFamily; font.weight: settings.fontWeight; font.italic: settings.fontItalic; font.letterSpacing: theme.letterSpacing; font.pixelSize: theme.fontMedium
+                    }
+                    HoverHandler { id: mxCtxHov }
+                    TapHandler {
+                        onTapped: {
+                            var path = col.menuPath
+                            var sig = modelData.sig
+                            var wasDir = col.menuIsDir
+                            col.closeDockMenu()
+                            if (sig === "paste") { col.pasteRequested(wasDir ? path : col.dirPath); return }
+                            if (path === "") return
+                            if (sig === "rename") col.renameRequested(path)
+                            else if (sig === "cut")  col.cutRequested(path)
+                            else if (sig === "copy") col.copyRequested(path)
+                            else if (sig === "toss") col.tossRequested(path)
+                        }
+                    }
+                }
+            }
+
+            // divider + dock items — only for .desktop files
+            Rectangle {
+                visible: dockMenu.menuIsDesktop
+                width: parent.width - 8; height: 1
+                x: 4
+                color: col.goldDeep; opacity: 0.35
+            }
+
+            Item {
+                visible: dockMenu.menuIsDesktop
+                width: parent.width; height: 28
+                Rectangle {
+                    anchors.fill: parent; radius: 6
+                    color: addHov.hovered ? Qt.rgba(139/255, 30/255, 63/255, 0.85) : "transparent"
+                }
+                Rectangle {
+                    visible: addHov.hovered
+                    anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom
+                    anchors.margins: 3
+                    width: 2; radius: 1; color: col.gold
+                }
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.left: parent.left; anchors.leftMargin: 12
+                    text: "Add to Dock"
+                    color: addHov.hovered ? col.cream : col.menuInk
+                    font.family: theme.fontFamily; font.weight: settings.fontWeight; font.italic: settings.fontItalic; font.letterSpacing: theme.letterSpacing; font.pixelSize: theme.fontMedium
+                }
+                HoverHandler { id: addHov }
+                TapHandler {
+                    onTapped: {
+                        var path = col.menuPath
+                        col.closeDockMenu()
+                        if (path !== "") col.addToDock(path)
+                    }
+                }
+            }
+
+            Item {
+                visible: dockMenu.menuIsDesktop
+                width: parent.width; height: 28
+                Rectangle {
+                    anchors.fill: parent; radius: 6
+                    color: remHov.hovered ? Qt.rgba(139/255, 30/255, 63/255, 0.85) : "transparent"
+                }
+                Rectangle {
+                    visible: remHov.hovered
+                    anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom
+                    anchors.margins: 3
+                    width: 2; radius: 1; color: col.gold
+                }
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.left: parent.left; anchors.leftMargin: 12
+                    text: "Remove from Dock"
+                    color: remHov.hovered ? col.cream : col.menuInk
+                    font.family: theme.fontFamily; font.weight: settings.fontWeight; font.italic: settings.fontItalic; font.letterSpacing: theme.letterSpacing; font.pixelSize: theme.fontMedium
+                }
+                HoverHandler { id: remHov }
+                TapHandler {
+                    onTapped: {
+                        var path = col.menuPath
+                        col.closeDockMenu()
+                        if (path !== "") col.removeFromDock(path)
+                    }
+                }
+            }
+        }
+    }
+
+    function glyph(kind) {
+        if (kind === "img")   return "\u25a3"
+        if (kind === "music") return "\u266a"
+        if (kind === "video") return "\u25b6"
+        return "\u25a4"
+    }
+}

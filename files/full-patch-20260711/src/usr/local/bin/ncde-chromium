@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# ncde-chromium — launcher wrapper that applies NCDE's livery.
+# Install as the target of the "Web Browser" default-app entry, or symlink as
+# `chromium` early on PATH. Loads the NCDE theme chosen by the sync script and
+# sources the generated flag file.
+set -euo pipefail
+CFG="$HOME/.config/ncde"
+STATE="$CFG/chromium-theme"
+FLAGS_FILE="$CFG/chromium-flags.conf"
+REAL="${NCDE_CHROMIUM_BIN:-/usr/bin/chromium}"
+
+# make sure the livery is current
+/usr/local/bin/ncde-chromium-sync.sh >/dev/null 2>&1 || true
+
+args=()
+# load the NCDE chrome theme (unpacked). --load-extension applies a theme too.
+if [[ -f "$STATE" ]]; then
+  themedir="$(cat "$STATE")"
+  if [[ -d "$themedir" ]]; then
+    # Chromium compiles an unpacked theme into "Cached Theme.pak" INSIDE the
+    # theme's own folder. The shipped folders are root-owned, so every launch
+    # logged "Could not open pak file for writing: FILE_ERROR_ACCESS_DENIED" and
+    # "Failed to load theme data pack" (2026-09-25). Load a user-owned copy
+    # instead, refreshed whenever the shipped manifest changes.
+    cache="${XDG_CACHE_HOME:-$HOME/.cache}/ncde/chromium-theme/$(basename "$themedir")"
+    if ! cmp -s "$themedir/manifest.json" "$cache/manifest.json" 2>/dev/null; then
+      rm -rf "$cache" && mkdir -p "$cache" && cp -r "$themedir/." "$cache/" || cache="$themedir"
+    fi
+    args+=( "--load-extension=$cache" )
+  fi
+fi
+# source generated flags (web dark-mode, optional force-dark)
+if [[ -f "$FLAGS_FILE" ]]; then
+  while IFS= read -r line; do
+    [[ "$line" == --* ]] && args+=( "$line" )
+  done < "$FLAGS_FILE"
+fi
+
+exec "$REAL" "${args[@]}" "$@"

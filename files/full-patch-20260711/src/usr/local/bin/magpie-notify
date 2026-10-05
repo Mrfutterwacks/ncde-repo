@@ -1,0 +1,14 @@
+#!/bin/bash
+# magpie-notify — x-scheme-handler for magpie-notify:<b64url title>.<b64url body>
+# Magpie Talker's Messenger pane hands new Facebook messages here (Qt.openUrlExternally,
+# no shell anywhere); this pops them through dunst like every other NCDE popup.
+u=${1#magpie-notify:}
+[[ $u =~ ^[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*$ ]] || exit 0
+dec() {
+    local s=${1//-/+}; s=${s//_//}
+    while (( ${#s} % 4 )); do s+="="; done
+    printf '%s' "$s" | base64 -d 2>/dev/null | tr -d '\000-\010\013-\037' | head -c 500
+}
+esc() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
+t=$(dec "${u%%.*}"); b=$(dec "${u#*.}")
+exec notify-send -a "Magpie Talker" -i internet-group-chat -c im.received -- "$(esc "${t:-Messenger}")" "$(esc "$b")"

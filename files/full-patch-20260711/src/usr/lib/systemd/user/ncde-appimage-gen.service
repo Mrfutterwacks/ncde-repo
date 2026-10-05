@@ -1,0 +1,6 @@
+[Unit]
+Description=NCDE: write launchers for AppImages in ~/Applications
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/ncde/ncde-appimage-gen

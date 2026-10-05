@@ -1,0 +1,3 @@
+SESSION_HANDOFF.md read:     YES / NO
+Task this session:           [one line]
+Tier-2 doc(s) read for it:   [list, or NONE]

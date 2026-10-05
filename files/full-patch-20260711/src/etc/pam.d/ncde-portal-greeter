@@ -1,0 +1,6 @@
+#%PAM-1.0
+# /etc/pam.d/ncde-portal-greeter — the greeter's own logind session (class greeter).
+# Permit-only auth, plus a session stack with pam_systemd so logind sees the greeter.
+auth      required  pam_permit.so
+account   include   system-login
+session   include   system-login

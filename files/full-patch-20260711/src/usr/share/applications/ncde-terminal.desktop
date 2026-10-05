@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=NCDE Terminal
+GenericName=Terminal Emulator
+Comment=NCDE native stained-glass terminal — Verda, the old spider of the house
+Exec=ncde-terminal %F
+Icon=utilities-terminal
+Categories=System;TerminalEmulator;
+Keywords=terminal;shell;bash;console;ncde;verda;
+StartupWMClass=ncde-terminal
+StartupNotify=true
+Terminal=false
+X-NCDE-Native=true

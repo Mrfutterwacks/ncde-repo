@@ -1,0 +1,25 @@
+[Unit]
+Description=NCDE App-Nap tier driver (Lelan deciding; drives Sentinel per-window)
+Documentation=file:/usr/share/ncde/ncde-appnap.README.md
+# Run inside the graphical user session: we need $DISPLAY and the running WM.
+After=graphical-session.target
+PartOf=graphical-session.target
+Requires=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/ncde-appnap
+# The X server / Sentinel may briefly be unavailable; the daemon retries
+# internally, but if it ever exits, bring it back.
+Restart=always
+RestartSec=2
+# Keep it lightweight and out of the way.
+Nice=5
+# Hardening: it only needs to read X11 and talk to the Sentinel system service.
+NoNewPrivileges=yes
+ProtectHome=read-only
+ProtectSystem=strict
+PrivateTmp=yes
+
+[Install]
+WantedBy=default.target

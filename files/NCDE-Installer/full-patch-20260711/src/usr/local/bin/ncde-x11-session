@@ -1,0 +1,148 @@
+#!/bin/bash
+# ncde-x11-session — the NCDE session (2026-10-01: LaPivot is built from source, my-project/source-recovery/LaPivot).
+# Load glitch fix: LaPivot launches FIRST, helpers start in background.
+# DISPLAY is kept from the login manager (was forced to :0).
+export DISPLAY="${DISPLAY:-:0}"
+export XDG_SESSION_TYPE=x11
+export XDG_CURRENT_DESKTOP=NCDE
+export GDK_BACKEND=x11
+export QT_QPA_PLATFORM=xcb
+export LD_PRELOAD="${LD_PRELOAD:+$LD_PRELOAD:}/usr/lib/ncde/ncde-gtk4-preload.so"
+export QT_QPA_PLATFORMTHEME=ncde
+export GTK_CSD=0
+export XCURSOR_THEME=Kith
+_ncde_cursz=$(grep -o '"cursorSize": *[0-9]*' "$HOME/.config/ncde/input.json" 2>/dev/null | grep -o '[0-9]*$')
+export XCURSOR_SIZE="${_ncde_cursz:-32}"
+export XCURSOR_PATH="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/ncde-cursors:$HOME/.local/share/icons:$HOME/.icons:/usr/share/icons:/usr/share/pixmaps"
+export QSG_RENDER_LOOP=threaded
+export QML_XHR_ALLOW_FILE_READ=1
+export QML_XHR_ALLOW_FILE_WRITE=1
+export QML_DISK_CACHE_PATH="${XDG_CACHE_HOME:-$HOME/.cache}/ncde/qmlcache"
+mkdir -p "$QML_DISK_CACHE_PATH" 2>/dev/null || true
+eval $(gnome-keyring-daemon --start --components=secrets)
+export GNOME_KEYRING_CONTROL GNOME_KEYRING_PID SSH_AUTH_SOCK
+
+NET_JSON="$HOME/.config/ncde/network.json"
+if [ -f "$NET_JSON" ] && [ "$(jq -r '.proxyEnabled // false' "$NET_JSON" 2>/dev/null)" = "true" ]; then
+    PROXY_HOST=$(jq -r '.proxyHost // ""' "$NET_JSON")
+    PROXY_PORT=$(jq -r '.proxyPort // 8080' "$NET_JSON")
+    if [ -n "$PROXY_HOST" ]; then
+        export http_proxy="http://${PROXY_HOST}:${PROXY_PORT}"
+        export https_proxy="$http_proxy"
+        export HTTP_PROXY="$http_proxy"
+        export HTTPS_PROXY="$http_proxy"
+        export no_proxy="localhost,127.0.0.1"
+        export NO_PROXY="$no_proxy"
+    fi
+fi
+
+systemctl --user import-environment DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE XCURSOR_THEME XCURSOR_SIZE XCURSOR_PATH GTK_MODULES LD_PRELOAD QT_QPA_PLATFORMTHEME
+dbus-update-activation-environment --systemd DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE XCURSOR_THEME XCURSOR_SIZE XCURSOR_PATH GTK_MODULES LD_PRELOAD QT_QPA_PLATFORMTHEME
+[ -n "$http_proxy" ] && { systemctl --user import-environment http_proxy https_proxy no_proxy HTTP_PROXY HTTPS_PROXY NO_PROXY
+    dbus-update-activation-environment --systemd http_proxy https_proxy no_proxy HTTP_PROXY HTTPS_PROXY NO_PROXY; }
+
+SESSION_PID=$$
+
+ncde_respawn() {
+    ( fails=0
+      while kill -0 "$SESSION_PID" 2>/dev/null; do
+          start=$(date +%s)
+          "$@"
+          rc=$?
+          [ "$rc" -eq 0 ] && break
+          if [ $(( $(date +%s) - start )) -lt 30 ]; then
+              fails=$((fails+1)); [ "$fails" -ge 5 ] && break
+          else
+              fails=0
+          fi
+          sleep 0.2
+      done ) &
+}
+
+# ── Background helper setup — runs while LaPivot is already on screen ────────
+(
+    xrandr --auto 2>/dev/null || true
+
+    picom_backend=glx
+    if [ -f "$HOME/.config/ncde/picom-backend" ]; then
+        picom_backend=$(cat "$HOME/.config/ncde/picom-backend" 2>/dev/null)
+    elif command -v glxinfo >/dev/null 2>&1; then
+        _renderer=$(timeout 3 glxinfo -B 2>/dev/null | grep -iE 'opengl renderer|renderer string' | head -1)
+        case "${_renderer:-EMPTY}" in
+            *llvmpipe*|*softpipe*|*swrast*|*[Ss]oftware*|EMPTY) picom_backend=xrender ;;
+        esac
+        echo "$picom_backend" > "$HOME/.config/ncde/picom-backend" 2>/dev/null || true
+    else
+        [ -e /dev/dri/renderD128 ] || [ -e /dev/dri/card0 ] || picom_backend=xrender
+    fi
+
+    pkill -x picom 2>/dev/null || true
+    ncde_respawn picom --config /etc/picom.conf --backend "$picom_backend"
+
+    pkill -x xfce-polkit 2>/dev/null || true
+    ncde_respawn /usr/lib/xfce-polkit/xfce-polkit
+
+    pkill -x xembedsniproxy 2>/dev/null || true
+    [ -x /usr/lib/xembedsniproxy ] && ncde_respawn /usr/lib/xembedsniproxy
+
+    if [ -x /usr/lib/geoclue-2.0/demos/agent ]; then
+        pgrep -f /usr/lib/geoclue-2.0/demos/agent >/dev/null 2>&1 || \
+            /usr/lib/geoclue-2.0/demos/agent &
+    fi
+
+    if command -v xss-lock >/dev/null 2>&1 && [ -x /usr/bin/ncde-lock-xss ] \
+       && [ -x /usr/bin/ncde-screensaver-notify ]; then
+        # X's own screensaver timer stays OFF: LaPivot (Settings + IdlePolicy) is the one idle owner — it starts
+        # the screensaver, asks for the idle lock and suspends. Setting it here armed a second saver and an
+        # xss-lock lock at timeout + cycle (2026-09-30 "it locks if idle too long"). xss-lock remains the
+        # locker for sleep and for lock requests.
+        xset s off 2>/dev/null || true
+        pkill -x xss-lock 2>/dev/null || true
+        ncde_respawn xss-lock --transfer-sleep-lock -n /usr/bin/ncde-screensaver-notify -- /usr/bin/ncde-lock-xss
+    fi
+) &
+
+ncde_cfg="$HOME/.config/ncde"
+ncde_promote() {
+    [ -d "$ncde_cfg" ] || return 0
+    for t in "$ncde_cfg"/*.tmp; do
+        [ -e "$t" ] || continue
+        b="${t%.tmp}"
+        if [ -s "$t" ] && { [ ! -e "$b" ] || [ "$t" -nt "$b" ]; }; then
+            cp -f -- "$t" "$b"
+        fi
+    done
+}
+ncde_promote
+
+if [ -d /run/archiso ]; then
+    ( sleep 4; sh /etc/calamares/launch.sh ) &
+fi
+
+# ── LaPivot — the desktop. Launches immediately; helpers run behind it. ──────
+debug_log="$HOME/ncde-debug.log"
+if [ -f "$debug_log" ] && [ "$(wc -l < "$debug_log" 2>/dev/null || echo 0)" -gt 5000 ]; then
+    tail -n 2000 "$debug_log" > "$debug_log.tmp" && mv -f "$debug_log.tmp" "$debug_log"
+fi
+rapid_crashes=0
+while :; do
+    launch_ts=$(date +%s)
+    {
+        echo "=== $(date '+%Y-%m-%d %H:%M:%S') LaPivot launch (pid $$) ==="
+        NCDE_NOTIFY_DEBUG=1 LD_PRELOAD="${LD_PRELOAD:+$LD_PRELOAD:}/usr/lib/ncde/ncde-notify.so" /usr/local/bin/LaPivot
+        lapivot_exit=$?
+        echo "=== $(date '+%Y-%m-%d %H:%M:%S') LaPivot exited with code $lapivot_exit ==="
+    } >> "$debug_log" 2>&1
+    [ "$lapivot_exit" -eq 0 ] && break
+    if [ $(( $(date +%s) - launch_ts )) -lt 60 ]; then
+        rapid_crashes=$((rapid_crashes + 1))
+        if [ "$rapid_crashes" -ge 3 ]; then
+            echo "=== $(date '+%Y-%m-%d %H:%M:%S') LaPivot crashed $rapid_crashes times within 60s of launch — giving up, returning to login ===" >> "$debug_log"
+            break
+        fi
+    else
+        rapid_crashes=0
+    fi
+    echo "=== $(date '+%Y-%m-%d %H:%M:%S') LaPivot crashed (exit $lapivot_exit) — relaunching to keep the session alive ===" >> "$debug_log"
+done
+ncde_promote

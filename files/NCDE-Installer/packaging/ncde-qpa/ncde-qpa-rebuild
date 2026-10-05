@@ -1,0 +1,56 @@
+#!/bin/bash
+# ncde-qpa-rebuild — rebuild NCDE's Qt platform theme against the Qt on THIS machine.
+#
+# libncde-qpa.so subclasses QGenericUnixTheme (Qt private API): a copy built for
+# one Qt minor version is not safe on the next. pacman runs this after every
+# qt6-base change (ncde-qpa-rebuild.hook) and after every NCDE patch run
+# (ncde-apply). Outcome is always one of two safe states:
+#   built + probe loads it  -> plugin installed, global menus work
+#   anything fails          -> plugin set aside; Qt quietly uses its default
+#                              theme, the desktop still starts (no menus in
+#                              foreign Qt apps until the next successful build)
+set -u
+SRCDIR="${NCDE_QPA_SRC:-/usr/share/ncde-qpa/src}"
+DEST="${NCDE_QPA_DEST:-/usr/lib/qt6/plugins/platformthemes/libncde-qpa.so}"
+STATE="${NCDE_QPA_STATE:-/var/lib/ncde-qpa}"
+log(){ echo "ncde-qpa: $*"; logger -t ncde-qpa -- "$*" 2>/dev/null || true; }
+
+disable(){
+  if [ -f "$DEST" ]; then
+    mv -f "$DEST" "$DEST.disabled" && log "plugin set aside ($1) — desktop keeps running on Qt's default theme"
+  else
+    log "no working plugin ($1) — Qt default theme in use"
+  fi
+  exit 0   # never fail a pacman transaction over this
+}
+
+V="$(pkg-config --modversion Qt6Gui 2>/dev/null)" || disable "Qt6Gui dev files not found"
+INC="$(pkg-config --variable=includedir Qt6Gui)"
+MOC=/usr/lib/qt6/moc
+[ -x "$MOC" ] || disable "moc missing"
+command -v g++ >/dev/null || disable "g++ missing"
+
+# already built for this exact Qt and still loading? nothing to do
+if [ -f "$DEST" ] && [ "$(cat "$STATE/built-for" 2>/dev/null)" = "$V" ] && "$STATE/ncde-qpa-probe" "$DEST" >/dev/null 2>&1; then
+  log "plugin current for Qt $V"; exit 0
+fi
+
+W="$(mktemp -d /tmp/ncde-qpa.XXXXXX)"; trap 'rm -rf "$W"' EXIT
+cp "$SRCDIR"/* "$W"/ && cd "$W" || disable "cannot stage sources"
+PRIV="-I$INC/QtGui/$V -I$INC/QtGui/$V/QtGui -I$INC/QtCore/$V -I$INC/QtCore/$V/QtCore"
+"$MOC" ncde-qpa-theme.cpp -o moc_ncde-qpa-theme.cpp 2>build.log || disable "moc failed"
+# shellcheck disable=SC2046,SC2086
+g++ -O2 -shared -fPIC -DQT_NO_KEYWORDS -o libncde-qpa.so ncde-qpa-theme.cpp \
+    $(pkg-config --cflags Qt6Gui) $PRIV -lQt6Gui -lQt6Core -lxcb 2>>build.log \
+  || { tail -5 build.log | while read -r l; do log "$l"; done; disable "compile failed against Qt $V"; }
+# shellcheck disable=SC2046,SC2086
+g++ -O1 -fPIC ncde-qpa-probe.cpp -o ncde-qpa-probe $(pkg-config --cflags --libs Qt6Gui) $PRIV 2>>build.log \
+  || disable "probe build failed against Qt $V"
+./ncde-qpa-probe "$W/libncde-qpa.so" >/dev/null 2>&1 || disable "fresh build did not load under Qt $V"
+
+install -d -m 755 "$STATE" "$(dirname "$DEST")"
+install -m 644 libncde-qpa.so "$DEST"
+install -m 755 ncde-qpa-probe "$STATE/ncde-qpa-probe"
+rm -f "$DEST.disabled"
+echo "$V" > "$STATE/built-for"
+log "plugin rebuilt and verified for Qt $V"

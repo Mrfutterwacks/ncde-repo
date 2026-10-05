@@ -1,0 +1,8 @@
+# StatusNotifierWatcherAdaptor interface additions (not in oracle metaobject)
+# These are plain C++ methods, not QObject meta-object members
+# oracle metaobject has: RegisteredStatusNotifierItems/IsStatusNotifierHostRegistered/ProtocolVersion properties,
+# StatusNotifierItemRegistered/StatusNotifierItemUnregistered/StatusNotifierHostRegistered signals,
+# RegisterStatusNotifierItem/RegisterStatusNotifierHost slots
+
+# FdoStatusNotifierWatcherAdaptor is a NEW CLASS (not an addition to StatusNotifierWatcherAdaptor)
+# It provides the org.freedesktop.StatusNotifierWatcher interface (oracle only had org.kde)

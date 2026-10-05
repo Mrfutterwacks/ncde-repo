@@ -1,0 +1,91 @@
+# NCDEEngine removals: system state/actions live in Lelan; NCDEEngine is the colour engine only.
+# QML audit used the active payload tree, excluding .prebak copies.
+
+# REMOVED: wifiEnabled
+# Grep proof: NO active ncde.wifiEnabled binding.
+# REMOVED: wifiNetworks
+# Grep proof: NO active ncde.wifiNetworks binding.
+# REMOVED: activeNetwork
+# Grep proof: NO active ncde.activeNetwork binding.
+# REMOVED: vpnConnections
+# Grep proof: NO active ncde.vpnConnections binding.
+# REMOVED: bluetoothEnabled
+# Grep proof: NO active ncde.bluetoothEnabled binding.
+# REMOVED: bluetoothDiscoverable
+# Grep proof: NO active ncde.bluetoothDiscoverable binding.
+# REMOVED: bluetoothDevices
+# Grep proof: NO active ncde.bluetoothDevices binding.
+
+# REMOVED: detectedTzName
+# QML STILL USES DateTimeTab.qml:93-96; Lelan group must rewire to lelan.detectedTzName.
+# REMOVED: detectedZone
+# QML STILL USES DateTimeTab.qml:93; Lelan group must rewire to lelan.detectedZone.
+# REMOVED: detectedRegion
+# QML STILL USES DateTimeTab.qml:94; Lelan group must rewire to lelan.detectedRegion.
+# REMOVED: detectedOffset
+# QML STILL USES DateTimeTab.qml:95; Lelan group must rewire to lelan.detectedOffset.
+# REMOVED: localTime
+# Grep proof: NO active ncde.localTime binding.
+# REMOVED: locating
+# QML STILL USES DateTimeTab.qml:96; Lelan group must rewire to lelan.locating.
+
+# REMOVED: users
+# QML STILL USES UsersTab.qml:2,15,151,233,239,329,363,375,434; Lelan group must rewire.
+# REMOVED: printers
+# QML STILL USES PrintersTab.qml:2,121,213; Lelan group must rewire.
+# REMOVED: appStreams
+# Grep proof: NO active ncde.appStreams binding; SoundTab uses Lelan.
+
+# REMOVED: setWifiEnabled
+# Grep proof: NO active ncde.setWifiEnabled call.
+# REMOVED: connectNetwork
+# Grep proof: NO active ncde.connectNetwork call.
+# REMOVED: disconnectNetwork
+# Grep proof: NO active ncde.disconnectNetwork call.
+# REMOVED: connectVpn
+# Grep proof: NO active ncde.connectVpn call.
+# REMOVED: disconnectVpn
+# Grep proof: NO active ncde.disconnectVpn call.
+# REMOVED: setBluetoothEnabled
+# Grep proof: NO active ncde.setBluetoothEnabled call.
+# REMOVED: setBluetoothDiscoverable
+# Grep proof: NO active ncde.setBluetoothDiscoverable call.
+# REMOVED: bluetoothConnect
+# Grep proof: NO active ncde.bluetoothConnect call.
+# REMOVED: bluetoothDisconnect
+# Grep proof: NO active ncde.bluetoothDisconnect call.
+# REMOVED: bluetoothPair
+# Grep proof: NO active ncde.bluetoothPair call.
+# REMOVED: bluetoothRemove
+# Grep proof: NO active ncde.bluetoothRemove call.
+# REMOVED: bluetoothScan
+# Grep proof: NO active ncde.bluetoothScan call.
+
+# REMOVED: refreshLocation
+# QML STILL USES DateTimeTab.qml:117; Lelan group must rewire to lelan.refreshLocation.
+# REMOVED: setTimezone
+# QML STILL USES DateTimeTab.qml:146; Lelan group must rewire to lelan.setTimezone.
+# REMOVED: setNtp
+# QML STILL USES DateTimeTab.qml:167; Lelan group must rewire to lelan.setNtp.
+# REMOVED: addUser
+# QML STILL USES UsersTab.qml:232-233; Lelan group must rewire to lelan.addUser.
+# REMOVED: removeUser
+# QML STILL USES UsersTab.qml:151; Lelan group must rewire to lelan.removeUser.
+# REMOVED: setUserAdmin
+# QML STILL USES UsersTab.qml:363; Lelan group must rewire to lelan.setUserAdmin.
+# REMOVED: changePassword
+# QML STILL USES UsersTab.qml:238-239,434; Lelan group must rewire.
+# REMOVED: setAutoLogin(QString)
+# QML STILL USES UsersTab.qml:329; Lelan group must rewire to lelan.setAutoLogin.
+# REMOVED: setAutoLogin(QString,bool)
+# QML STILL USES UsersTab.qml:375; Lelan group must rewire to lelan.setAutoLogin.
+# REMOVED: setUserAvatar
+# QML STILL USES UsersTab.qml:329 and MagpieTalker.qml:148-149; Lelan group must rewire.
+# REMOVED: setDefaultPrinter
+# QML STILL USES PrintersTab.qml:213; Lelan group must rewire to lelan.setDefaultPrinter.
+# REMOVED: removePrinter
+# QML STILL USES PrintersTab.qml:121; Lelan group must rewire to lelan.removePrinter.
+# REMOVED: setAppVolume
+# Grep proof: NO active ncde.setAppVolume call; SoundTab uses Lelan.
+
+# KEEP: applyPalette(QVariantMap) is used by FiligreeTab.qml:1404 and main.qml:82.

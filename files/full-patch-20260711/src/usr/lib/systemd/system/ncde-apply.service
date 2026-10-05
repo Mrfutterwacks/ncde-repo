@@ -1,0 +1,8 @@
+[Unit]
+Description=Apply the NCDE patch pacman just installed
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/ncde-update/ncde-apply
+TimeoutStartSec=90min

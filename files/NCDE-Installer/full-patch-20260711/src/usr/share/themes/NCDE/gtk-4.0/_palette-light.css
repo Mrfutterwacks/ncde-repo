@@ -1,0 +1,22 @@
+/* NCDE GTK4 — light grounds. DEFINES ONLY. Engine-rewritten LIVE. gtk.md §5.2. */
+@define-color theme_bg_color         #E7E1D8;  /* ← panelBg */
+@define-color theme_fg_color         #2B2621;  /* ← ink     */
+@define-color theme_base_color       #F4F1EC;  /* ← surface */
+@define-color theme_text_color       #2B2621;  /* ← ink     */
+@define-color insensitive_bg_color   #E7E1D8;  /* ← panelBg */
+@define-color insensitive_fg_color   #9A9088;  /* ← inkSoft */
+@define-color borders                #C2B6A4;  /* ← border  */
+@define-color theme_selected_fg_color #FFFFFF;
+
+/* libadwaita compat named colors */
+@define-color window_bg_color        #E7E1D8;
+@define-color window_fg_color        #2B2621;
+@define-color view_bg_color          #F4F1EC;
+@define-color view_fg_color          #2B2621;
+@define-color headerbar_bg_color     #DED7CB;
+@define-color headerbar_fg_color     #2B2621;
+@define-color card_bg_color          #F4F1EC;
+@define-color card_fg_color          #2B2621;
+@define-color popover_bg_color       #E7E1D8;
+@define-color popover_fg_color       #2B2621;
+/* theme_selected_bg_color + ncde_accent + accent_* come from _accent.css. */

@@ -1,0 +1,26 @@
+# NCDE GTK2 — shipped static default. gtk.md §6.2.
+# Exists so gtk-theme-name="NCDE" resolves for GTK2 apps before the engine's
+# first per-user write. After first login ~/.gtkrc-2.0 (engine-regenerated,
+# whole, with live accent) always wins. Canonical dark bridge palette + default
+# accent #6774bd baked in. Target GTK 2.24.33.
+gtk-theme-name="NCDE"
+gtk-font-name="IM Fell English 11"
+
+style "ncde" {
+  bg[NORMAL]      = "#263033"    # panelBg
+  fg[NORMAL]      = "#E6F1F2"    # ink
+  base[NORMAL]    = "#1E2527"    # surface
+  text[NORMAL]    = "#E6F1F2"    # ink
+  bg[ACTIVE]      = "#263033"    # panelBg
+  fg[ACTIVE]      = "#5A6670"    # inkSoft
+  bg[PRELIGHT]    = "#6774bd"    # accent
+  fg[PRELIGHT]    = "#FFFFFF"
+  bg[SELECTED]    = "#6774bd"    # accent
+  fg[SELECTED]    = "#FFFFFF"
+  base[SELECTED]  = "#6774bd"    # accent
+  text[SELECTED]  = "#FFFFFF"
+  bg[INSENSITIVE] = "#263033"    # panelBg
+  fg[INSENSITIVE] = "#5A6670"    # inkSoft
+}
+widget_class "*" style "ncde"
+class "*" style "ncde"

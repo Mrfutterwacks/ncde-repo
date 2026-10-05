@@ -1,0 +1,4 @@
+# NCDE: make backlight brightness group-writable so the video-group user's
+# Display slider can set it with no privilege (mirrors the `light` pkg rule;
+# shipped so a rebuilt ISO works even without that package).
+ACTION=="add", SUBSYSTEM=="backlight", RUN+="/bin/chgrp video /sys/class/backlight/%k/brightness", RUN+="/bin/chmod g+w /sys/class/backlight/%k/brightness"

@@ -1,0 +1,10 @@
+#!/bin/bash
+# NCDE fix 2026-07-17 — hide Timeshift from menus (Soundings is the single
+# restore path; a 2026-07-10 attempt created a decoy copy that never actually
+# hid anything). The timeshift package ships this file un-backed-up, so a
+# plain edit gets silently overwritten on the next Timeshift update — this
+# hook reapplies NoDisplay=true every time.
+set -e
+f=/usr/share/applications/timeshift-gtk.desktop
+[ -f "$f" ] || exit 0
+grep -q '^NoDisplay=true' "$f" || echo 'NoDisplay=true' >> "$f"

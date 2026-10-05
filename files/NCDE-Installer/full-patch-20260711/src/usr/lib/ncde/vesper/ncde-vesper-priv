@@ -1,0 +1,46 @@
+#!/bin/bash
+# ncde-vesper-priv — Vesper's privileged helper. Runs ONLY a fixed whitelist of
+# security-maintenance actions as root, invoked via pkexec from the user-scope brain
+# (vesper_brain.service runs as the user; these actions need root). This is the
+# commercial-suite pattern: the UI never holds root, it asks polkit for one specific,
+# audited action. No arbitrary command is ever accepted — the case list below is the
+# entire surface.
+set -u
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+LOG=/var/log/ncde-vesper-priv.log
+say(){ printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" >>"$LOG" 2>/dev/null; echo "$*"; }
+
+case "${1:-}" in
+  rebaseline)
+    # Re-teach rkhunter what "normal" is (clears stale "file properties changed" after
+    # package updates), then refresh the report Vesper reads. Not destructive.
+    say "rebaseline: rkhunter --propupd"
+    /usr/bin/rkhunter --propupd --nocolors >>"$LOG" 2>&1
+    rc=$?
+    if [ -x /usr/lib/ncde/vesper/rkhunter-scan.sh ]; then
+      say "rebaseline: refreshing scan report"
+      /usr/lib/ncde/vesper/rkhunter-scan.sh >>"$LOG" 2>&1
+    fi
+    exit $rc
+    ;;
+  freshclam)
+    # Update ClamAV virus definitions. Prefer the packaged updater service if present
+    # (avoids the freshclam lock); fall back to a direct run.
+    say "freshclam: updating virus definitions"
+    if systemctl list-unit-files clamav-freshclam.service >/dev/null 2>&1; then
+      systemctl start clamav-freshclam.service >>"$LOG" 2>&1 && exit 0
+    fi
+    /usr/bin/freshclam >>"$LOG" 2>&1
+    exit $?
+    ;;
+  scan-report)
+    # Force an immediate rootkit re-scan (report refresh) without re-baselining.
+    say "scan-report: refreshing rkhunter report"
+    /usr/lib/ncde/vesper/rkhunter-scan.sh >>"$LOG" 2>&1
+    exit $?
+    ;;
+  *)
+    echo "ncde-vesper-priv: unknown action '${1:-}'" >&2
+    exit 2
+    ;;
+esac

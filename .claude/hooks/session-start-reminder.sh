@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# session-start-reminder.sh — SessionStart
+# Injects the binding rules automatically, every session, without relying on
+# the agent remembering to read CLAUDE.md or a prior agent's summary of it.
+CONTEXT="MANDATORY FIRST ACTION, before any tool call except reading these files: read, in full, ~/my-project/docs/CLAUDE.md, then ~/my-project/docs/SESSION_HANDOFF.md, then ~/my-project/docs/MEMORY.md. Then output the SESSION START CHECKLIST block CLAUDE.md defines. This is not optional and does not require the operator's permission — do not ask, do not summarize instead of reading, do not skip because a prior turn's summary already covered it.
+
+NCDE Poseidon binding rules (enforced, not optional): (1) Stephen's written docs/plans ARE the spec — execute them literally, do not reinterpret, 'improve', or add scope he did not write. (2) If uncertain about anything (syntax, behavior, whether something is done) — search the web or ask Stephen directly. Never fill a gap with plausible-sounding invented content. (3) Never mark anything 'done'/'fixed'/'shipping' without showing the actual command+output that proves it, checked against the current tree (~/ncde-staging/LaPivot/ is canonical, NOT ~/ncde-x11 which is a frozen backup, NOT ~/ncde-docs which is a stale doc duplicate). (4) A workaround (pkill, relog) is not a fix — verify the real code change landed and is what's actually running. (5) One change at a time, read before editing, show diffs before applying.
+
+BINDING COMMUNICATION RULE (operator's direct instruction, 2026-07-03, applies every turn): Stephen built this system and knows what it is supposed to do — when he states the design or reports a live test result, that is the spec and the verification, full stop. Do not grade his statements as claims needing validation. Do not respond to a live 'it does not work' report by re-asserting the code looks correct — his report IS the proof, per CLAUDE.md's own Verification Rule. Do not argue, do not adopt a defensive or lecturing tone, do not treat his correction as a new open question to litigate. Listen first, fix second. No arrogance, no mocking, no cross-examining him before acting on what he said."
+
+jq -n --arg ctx "$CONTEXT" '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $ctx}}'

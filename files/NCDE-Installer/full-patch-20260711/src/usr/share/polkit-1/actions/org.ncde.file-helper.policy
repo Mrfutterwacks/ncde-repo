@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1.0/policyconfig.dtd">
+<!-- org.ncde.file-helper — Orchidée's Sovereign Seal (Ctrl+Alt+E), 2026-07-07.
+     auth_admin_keep: one password opens the seal's working window (polkit keeps
+     the grant briefly), matching the "unlock, work, it relocks itself" design.
+     No user-visible base-OS jargon in the messages (Hide-Linux rule). -->
+<policyconfig>
+  <vendor>NCDE</vendor>
+  <action id="org.ncde.file-helper">
+    <description>Work inside the house's own rooms</description>
+    <message>NCDE needs your password to move things inside the house's own rooms.</message>
+    <defaults>
+      <allow_any>auth_admin_keep</allow_any>
+      <allow_inactive>auth_admin_keep</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/ncde/ncde-file-helper</annotate>
+  </action>
+</policyconfig>

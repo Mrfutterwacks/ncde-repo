@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Vesper
+GenericName=Security
+Comment=NCDE security console
+Exec=/usr/local/bin/ncde-vesper
+Icon=security-high
+Terminal=false
+Categories=System;Security;
+Keywords=security;antivirus;firewall;threat;vesper;
+StartupNotify=true

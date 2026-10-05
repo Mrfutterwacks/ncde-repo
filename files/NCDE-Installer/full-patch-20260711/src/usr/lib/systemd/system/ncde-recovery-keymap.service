@@ -1,0 +1,18 @@
+[Unit]
+# NCDE System Restore ("Soundings") — install the Ctrl+Alt+R -> recovery-VT
+# console binding. No-X path: works at a text VT / when the desktop is dead.
+# Install target: /usr/lib/systemd/system/ncde-recovery-keymap.service
+# (enabled on the installed system by chrooted_post_install.sh).
+Description=NCDE System Restore — bind Ctrl+Alt+R to the recovery VT (console keymap)
+Documentation=file:///usr/share/doc/ncde/NCDE-RECOVERY-APP.md
+After=systemd-vconsole-setup.service
+Wants=systemd-vconsole-setup.service
+ConditionPathExists=/usr/local/share/ncde/ncde-recovery.kmap
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/loadkeys /usr/local/share/ncde/ncde-recovery.kmap
+
+[Install]
+WantedBy=multi-user.target

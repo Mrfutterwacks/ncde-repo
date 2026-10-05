@@ -1,0 +1,14 @@
+// 49-ncde-vesper.rules — let the machine owner run Vesper's SAFE, non-destructive
+// security-maintenance actions (re-baseline the rootkit scanner, update virus
+// definitions) without a password prompt, so Vesper can actually carry them out
+// from his user-scope brain service. Modeled on NCDE's recovery-app precedent
+// (49-nopasswd-ncde-recovery.rules). Restricted to an ACTIVE, LOCAL session — a
+// remote or inactive session still hits the auth_admin default in the .policy.
+// These ops never delete data (propupd re-teaches the baseline; freshclam pulls
+// signatures) — quarantine/kill/ban still go through "he asks, you decide."
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.ncde.vesper.maintain" &&
+        subject.active && subject.local) {
+        return polkit.Result.YES;
+    }
+});

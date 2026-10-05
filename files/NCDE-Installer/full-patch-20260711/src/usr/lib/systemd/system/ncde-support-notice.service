@@ -1,0 +1,16 @@
+[Unit]
+Description=NCDE emergency VT — branded support notice (never a login)
+Conflicts=getty@tty12.service
+After=systemd-user-sessions.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/lib/ncde/ncde-support-notice
+TTYPath=/dev/tty12
+StandardInput=tty
+StandardOutput=tty
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

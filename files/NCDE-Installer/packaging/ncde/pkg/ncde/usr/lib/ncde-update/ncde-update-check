@@ -1,0 +1,20 @@
+#!/bin/bash
+# ncde-update-check (per-user timer) — "NCDE has updates": when the NCDE repo
+# has something newer, say so once per new version; the button opens NCDE
+# Command, whose System Update installs it together with Arch's updates.
+set -u
+UPD="$(checkupdates 2>/dev/null)" || true   # rc 2 = nothing to update
+NCDE="$(printf '%s\n' "$UPD" | grep -E '^ncde(-[a-z]+)? ' || true)"
+[ -n "$NCDE" ] || exit 0
+SEEN="${XDG_CACHE_HOME:-$HOME/.cache}/ncde/update-notified"
+mkdir -p "$(dirname "$SEEN")"
+[ "$(cat "$SEEN" 2>/dev/null)" = "$NCDE" ] && exit 0
+printf '%s' "$NCDE" > "$SEEN"
+NEWV="$(printf '%s\n' "$NCDE" | awk '$1=="ncde"{print $4}')"
+OTHER=$(( $(printf '%s\n' "$UPD" | grep -c .) - $(printf '%s\n' "$NCDE" | grep -c .) ))
+BODY="A new version of NCDE${NEWV:+ ($NEWV)} is ready."
+[ "$OTHER" -gt 0 ] && BODY="$BODY It installs together with $OTHER Arch updates."
+act="$(timeout 12h notify-send -a NCDE -i system-software-update -u normal \
+        -A update="Open NCDE Command" "NCDE has updates" "$BODY" 2>/dev/null)"
+[ "$act" = update ] && exec /usr/local/bin/ncde-command
+exit 0

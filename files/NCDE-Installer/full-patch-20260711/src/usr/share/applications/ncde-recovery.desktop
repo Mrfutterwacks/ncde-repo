@@ -1,0 +1,18 @@
+[Desktop Entry]
+# NCDE System Restore ("Soundings") — menu/dock entry for the desktop-alive case.
+# Install target: /usr/share/applications/ncde-recovery.desktop
+# Launches via a scoped sudoers NOPASSWD entry (/etc/sudoers.d/ncde-recovery) so
+# the restore engine has root; the app's own admin-seal (PAM ncde-restore, in the
+# confirm veil) remains the single auth gate before a rollback — the in-app seal
+# is the only password asked. 2026-09-23: was `pkexec`, which had no matching
+# polkit rule and always prompted a second time on top of the in-app seal.
+Type=Application
+Name=System Restore
+GenericName=Time Machine
+Comment=Roll your system back to a working point — your files are kept safe
+Exec=sudo -n /usr/local/bin/ncde-recovery
+Icon=document-revert
+Terminal=false
+Categories=System;Utility;
+Keywords=restore;recovery;backup;snapshot;rollback;time machine;soundings;
+StartupNotify=true

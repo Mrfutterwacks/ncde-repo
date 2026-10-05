@@ -1,0 +1,246 @@
+#!/usr/bin/env python3
+# ncde-automount — NCDE USB auto-mount daemon (userspace, no WM/binary changes).
+#
+# GAP G9: StorageTab.qml has an "Auto-mount USB on insertion" toggle
+# (settings.autoMountUsb) that persists to ~/.config/ncde/storage.json, but the
+# stripped LaPivot/Lelan binary never enforces it — Lelan::onUDisks2InterfacesAdded
+# only refreshes the removable-drive LIST, it never mounts. So the toggle was a
+# confirmed no-op.
+#
+# We cannot recompile the WM. So — exactly like the proven WeatherLive / ncde-stats
+# helper pattern — a tiny userspace daemon does the missing work: it watches udev
+# for newly inserted removable block devices and, ONLY when the toggle is on,
+# mounts them with `udisksctl mount` as the session user. No root: udisks' polkit
+# rule org.freedesktop.udisks2.filesystem-mount is allow_active for removable
+# media, so the active graphical session may mount without a password.
+#
+# The setting it honors (confirmed by grepping StorageTab.qml:33-34 and the
+# decompiled Settings::saveStorage, which writes QJsonObject{"autoMountUsb": bool}
+# to configDir + "/storage.json"):
+#
+#     FILE: $XDG_CONFIG_HOME/ncde/storage.json   (i.e. ~/.config/ncde/storage.json)
+#     KEY : "autoMountUsb"  (bool)
+#
+# The setting is RE-READ on every event, so toggling it in Settings takes effect
+# immediately with no restart. When it is false / missing / unreadable, the daemon
+# does NOTHING (fail-safe: default off).
+#
+# SAFETY: this process only reads /proc, /sys, storage.json and runs two well-known
+# subprocesses (udevadm, udisksctl). It touches nothing near ncde-portal / logind /
+# LaPivot. Every step is guarded; any error mounting one device is logged and the
+# watch loop continues. It never writes any file. The mount itself happens inside
+# the separate system udisks2 daemon, and udisks emits the InterfacesAdded that
+# Lelan already listens for, so StorageTab's list updates to "Mounted" on its own.
+
+import json
+import os
+import subprocess
+import sys
+import time
+
+# Only auto-mount devices whose whole-disk parent is removable OR that sit on the
+# USB bus, and that actually carry a mountable filesystem. This mirrors what
+# StorageTab calls a "removable drive" and deliberately never touches fixed disks.
+ATTEMPT_TTL = 15.0          # seconds: don't re-attempt the same devnode this often
+UDEVADM = "/usr/bin/udevadm"
+UDISKSCTL = "/usr/bin/udisksctl"
+STDBUF = "/usr/bin/stdbuf"
+
+
+def log(msg):
+    """Line to stderr -> journald. Never raises."""
+    try:
+        sys.stderr.write("ncde-automount: %s\n" % msg)
+        sys.stderr.flush()
+    except Exception:
+        pass
+
+
+def config_path():
+    """The exact file StorageTab persists to: <configdir>/ncde/storage.json."""
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    return os.path.join(base, "ncde", "storage.json")
+
+
+def auto_mount_enabled():
+    """Read ~/.config/ncde/storage.json and return settings.autoMountUsb.
+    Fail-safe: any missing file / bad JSON / absent key -> False (do nothing)."""
+    try:
+        with open(config_path(), "r") as f:
+            data = json.load(f)
+    except (OSError, IOError, ValueError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    return data.get("autoMountUsb", False) is True
+
+
+def dev_properties(devname):
+    """Authoritative current udev properties for a devnode, as a dict.
+    Returns {} on any failure (device vanished, udevadm missing, ...)."""
+    try:
+        out = subprocess.run(
+            [UDEVADM, "info", "--query=property", "--name=%s" % devname],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    if out.returncode != 0:
+        return {}
+    props = {}
+    for line in out.stdout.splitlines():
+        if "=" in line:
+            k, _, v = line.partition("=")
+            props[k] = v
+    return props
+
+
+def parent_removable(devname):
+    """True if the whole-disk parent of this devnode is removable
+    (/sys/block/<disk>/removable == 1). Guarded; False on any doubt."""
+    name = os.path.basename(devname)  # e.g. sdb1  or  sdb  or  mmcblk0p1
+    # Walk /sys/block/*/ to find the disk that owns this node.
+    try:
+        disks = os.listdir("/sys/block")
+    except OSError:
+        return False
+    for disk in disks:
+        if name == disk or os.path.isdir("/sys/block/%s/%s" % (disk, name)):
+            try:
+                with open("/sys/block/%s/removable" % disk, "r") as f:
+                    return f.read().strip() == "1"
+            except (OSError, IOError):
+                return False
+    return False
+
+
+def is_mount_candidate(props, devname):
+    """Decide whether this add/change event is a removable volume we should mount.
+    Conservative: must have a real filesystem AND be removable-or-USB."""
+    if props.get("SUBSYSTEM") != "block":
+        return False
+    if props.get("DEVTYPE") not in ("partition", "disk"):
+        return False
+    # Must carry a mountable filesystem. Skips empty devs, partition tables,
+    # extended partitions, LUKS/crypto containers (ID_FS_USAGE=crypto), swap, etc.
+    if props.get("ID_FS_USAGE") != "filesystem":
+        return False
+    # Removable gate: whole-disk removable flag OR sitting on the USB bus.
+    if props.get("ID_BUS") == "usb":
+        return True
+    if parent_removable(devname):
+        return True
+    return False
+
+
+def already_mounted(devname):
+    """True if the devnode already has a mountpoint (avoid redundant work)."""
+    try:
+        out = subprocess.run(
+            ["/usr/bin/findmnt", "-rn", "-S", devname],
+            capture_output=True, text=True, timeout=5,
+        )
+        return out.returncode == 0 and out.stdout.strip() != ""
+    except (OSError, subprocess.SubprocessError):
+        return False  # can't tell -> let udisksctl be the arbiter (it's idempotent)
+
+
+def do_mount(devname):
+    """Mount as the session user via udisks (polkit allow_active, no root).
+    Idempotent and fully guarded; result is logged, never raised."""
+    try:
+        out = subprocess.run(
+            [UDISKSCTL, "mount", "-b", devname, "--no-user-interaction"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as e:
+        log("mount %s failed to spawn: %s" % (devname, e))
+        return
+    msg = (out.stdout or out.stderr or "").strip()
+    if out.returncode == 0:
+        log("mounted %s: %s" % (devname, msg))
+    elif "already mounted" in msg.lower():
+        pass  # someone (or udisks) beat us to it -> fine
+    else:
+        log("mount %s declined (rc=%d): %s" % (devname, out.returncode, msg))
+
+
+def handle_event(action, devname, recent):
+    """Guarded handling of one udev event. Never raises."""
+    try:
+        if action not in ("add", "change"):
+            return
+        if not devname:
+            return
+        # Toggle re-read live, so runtime changes in Settings take effect at once.
+        if not auto_mount_enabled():
+            return
+        now = time.time()
+        last = recent.get(devname, 0.0)
+        if now - last < ATTEMPT_TTL:
+            return  # de-dupe: udev often fires several add/change for one insert
+        props = dev_properties(devname)
+        if not is_mount_candidate(props, devname):
+            return
+        if already_mounted(devname):
+            recent[devname] = now
+            return
+        recent[devname] = now
+        do_mount(devname)
+    except Exception as e:  # a bad event must never kill the watcher
+        log("event handling error for %s: %s" % (devname, e))
+
+
+def watch():
+    """Follow `udevadm monitor` (udev events, line-buffered) and act on each
+    add/change block. Returns (exits) if the monitor stream ever ends, so systemd
+    can restart us."""
+    cmd = [STDBUF, "-oL", UDEVADM, "monitor", "--udev",
+           "--subsystem-match=block", "--property"]
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True, bufsize=1)
+    except (OSError, subprocess.SubprocessError) as e:
+        log("cannot start udev monitor: %s" % e)
+        time.sleep(3)
+        return
+    recent = {}
+    action = None
+    devname = None
+    try:
+        for line in proc.stdout:
+            line = line.rstrip("\n")
+            if line == "":
+                # end of one event block -> act on what we collected
+                handle_event(action, devname, recent)
+                action = None
+                devname = None
+                continue
+            if "=" not in line:
+                continue  # header line like "UDEV  [..] add ... (block)"
+            k, _, v = line.partition("=")
+            if k == "ACTION":
+                action = v
+            elif k == "DEVNAME":
+                devname = v
+    except Exception as e:
+        log("monitor loop error: %s" % e)
+    finally:
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+
+
+def main():
+    log("started (honoring %s key autoMountUsb)" % config_path())
+    # Loop so a dead monitor is re-established even before systemd restarts us.
+    while True:
+        watch()
+        time.sleep(2)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        sys.exit(0)

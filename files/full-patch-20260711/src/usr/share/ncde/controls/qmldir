@@ -1,0 +1,28 @@
+# qmldir — optional module registration for the controls kit.
+# With this on the import path you can:  import NCDE.Controls 1.0
+# (qmldir comments are '#' — the old '//' lines were invalid directives and
+#  lint-noised all 23 controls.)
+module NCDE.Controls
+NCDEKit 1.0 NCDEKit.qml
+NCDEScrollBar 1.0 NCDEScrollBar.qml
+NCDEScrollView 1.0 NCDEScrollView.qml
+NCDEField 1.0 NCDEField.qml
+NCDEPasswordField 1.0 NCDEPasswordField.qml
+NCDEButton 1.0 NCDEButton.qml
+NCDECheck 1.0 NCDECheck.qml
+NCDERadio 1.0 NCDERadio.qml
+NCDEToggle 1.0 NCDEToggle.qml
+NCDESlider 1.0 NCDESlider.qml
+NCDEProgressBar 1.0 NCDEProgressBar.qml
+NCDEComboBox 1.0 NCDEComboBox.qml
+NCDEMenu 1.0 NCDEMenu.qml
+NCDETabBar 1.0 NCDETabBar.qml
+NCDETabButton 1.0 NCDETabButton.qml
+NCDESeparator 1.0 NCDESeparator.qml
+NCDESectionLabel 1.0 NCDESectionLabel.qml
+NCDESpinBox 1.0 NCDESpinBox.qml
+NCDEBusyIndicator 1.0 NCDEBusyIndicator.qml
+NCDEGroupBox 1.0 NCDEGroupBox.qml
+NCDEDialog 1.0 NCDEDialog.qml
+NCDEVellum 1.0 NCDEVellum.qml
+NCDEModeTransition 1.0 NCDEModeTransition.qml

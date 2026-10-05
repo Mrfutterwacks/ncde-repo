@@ -1,0 +1,247 @@
+// MoveToDialog.qml — native NCDE "Move To" folder picker overlay.
+// Full-window parchment overlay with a directory browser.
+// TapHandler everywhere. Opened via moveDialog.open(path).
+import QtQuick 2.15
+
+Item {
+    id: dlg
+    anchors.fill: parent
+    visible: false
+    z: 3000
+
+    property string sourcePath:  ""
+    property var    pickerChain: [orchidee.home]
+
+    NCDEKit { id: k }
+
+    signal done()
+    signal cancelled()
+
+    function open(path) {
+        sourcePath  = path
+        pickerChain = [orchidee.home]
+        visible     = true
+    }
+    function close() {
+        visible    = false
+        sourcePath = ""
+    }
+
+    // dim backdrop — tap outside the card to cancel
+    Rectangle {
+        anchors.fill: parent
+        color: Qt.rgba(0, 0, 0, 0.45)
+        TapHandler { onTapped: { dlg.close(); dlg.cancelled() } }
+    }
+
+    // dialog card
+    Rectangle {
+        id: card
+        anchors.centerIn: parent
+        width: 480; height: 420
+        radius: 14
+        color: ncde.surface
+        border.color: ncde.gilt1; border.width: 1.5
+
+        // shadow
+        Rectangle {
+            anchors.fill: parent
+            anchors.topMargin: 3; anchors.leftMargin: 3
+            z: -1; radius: parent.radius; color: Qt.rgba(0, 0, 0, 0.22)
+        }
+
+        // title
+        Text {
+            id: titleText
+            anchors {
+                top: parent.top;   topMargin: 16
+                left: parent.left; leftMargin: 16
+                right: parent.right; rightMargin: 16
+            }
+            text: "Move “" + orchidee.baseName(dlg.sourcePath) + "” to…"
+            font.family: theme.titleFont
+            font.pixelSize: theme.fontMedium + theme.scale(1)
+            color: k.ink
+            elide: Text.ElideMiddle
+        }
+
+        Rectangle {
+            id: div1
+            anchors {
+                top: titleText.bottom; topMargin: 10
+                left: parent.left; leftMargin: 16
+                right: parent.right; rightMargin: 16
+            }
+            height: 1; color: ncde.gilt1; opacity: 0.4
+        }
+
+        // breadcrumb
+        Row {
+            id: crumb
+            anchors {
+                top: div1.bottom; topMargin: 8
+                left: parent.left; leftMargin: 16
+                right: parent.right; rightMargin: 16
+            }
+            height: 20
+            clip: true; spacing: 4
+            Repeater {
+                model: dlg.pickerChain
+                delegate: Row {
+                    spacing: 4
+                    Text {
+                        text: index === 0 ? "⌂ Home" : orchidee.baseName(modelData)
+                        color: index === dlg.pickerChain.length - 1 ? k.ink : ncde.gilt0
+                        font.family: theme.titleFont
+                        font.pixelSize: theme.fontSmall + theme.scale(1)
+                        TapHandler {
+                            onTapped: dlg.pickerChain = dlg.pickerChain.slice(0, index + 1)
+                        }
+                    }
+                    Text {
+                        visible: index < dlg.pickerChain.length - 1
+                        text: "›"; color: ncde.gilt1
+                        font.pixelSize: theme.fontSmall + theme.scale(1)
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            id: div2
+            anchors {
+                top: crumb.bottom; topMargin: 8
+                left: parent.left; leftMargin: 16
+                right: parent.right; rightMargin: 16
+            }
+            height: 1; color: ncde.gilt1; opacity: 0.25
+        }
+
+        // directory list — fills space between div2 and div3
+        ListView {
+            id: dirList
+            anchors {
+                top: div2.bottom
+                bottom: div3.top
+                left: parent.left; leftMargin: 16
+                right: parent.right; rightMargin: 16
+            }
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+
+            model: {
+                var all = orchidee.entries(dlg.pickerChain[dlg.pickerChain.length - 1], false)
+                return all.filter(function(r) { return r.isDir && r.path !== dlg.sourcePath })
+            }
+
+            delegate: Item {
+                width: dirList.width; height: 30
+                Rectangle {
+                    anchors.fill: parent; anchors.margins: 2
+                    radius: 6
+                    color: dirHov.hovered ? Qt.rgba(139/255, 30/255, 63/255, 0.10) : "transparent"
+                }
+                Row {
+                    anchors {
+                        fill: parent
+                        leftMargin: 10; rightMargin: 10
+                    }
+                    spacing: 8
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "▸"; color: ncde.gilt1; font.pixelSize: theme.fontSmall
+                    }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: modelData.name
+                        font.family: theme.fontFamily; font.pixelSize: theme.fontMedium
+                        color: k.ink; elide: Text.ElideRight
+                        width: dirList.width - 60
+                    }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "›"; color: ncde.gilt1; font.pixelSize: theme.fontMedium
+                    }
+                }
+                HoverHandler { id: dirHov }
+                TapHandler {
+                    onTapped: {
+                        var c = dlg.pickerChain.slice()
+                        c.push(modelData.path)
+                        dlg.pickerChain = c
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            id: div3
+            anchors {
+                bottom: btnRow.top; bottomMargin: 10
+                left: parent.left; leftMargin: 16
+                right: parent.right; rightMargin: 16
+            }
+            height: 1; color: ncde.gilt1; opacity: 0.25
+        }
+
+        Row {
+            id: btnRow
+            anchors {
+                bottom: parent.bottom; bottomMargin: 16
+                horizontalCenter: parent.horizontalCenter
+            }
+            spacing: 16
+
+            // CANCEL
+            Rectangle {
+                width: 110; height: 34
+                radius: 17
+                color: cancelHov.hovered ? Qt.rgba(138/255, 90/255, 32/255, 0.15) : "transparent"
+                border.color: ncde.gilt1; border.width: 1
+                Text {
+                    anchors.centerIn: parent
+                    text: "CANCEL"
+                    font.family: theme.titleFont
+                    font.pixelSize: theme.fontSmall + theme.scale(1)
+                    color: ncde.gilt1; font.letterSpacing: 1
+                }
+                HoverHandler { id: cancelHov }
+                TapHandler { onTapped: { dlg.close(); dlg.cancelled() } }
+            }
+
+            // MOVE HERE
+            Rectangle {
+                id: moveBtn
+                property bool canMove: {
+                    if (dlg.sourcePath === "") return false
+                    var dest = dlg.pickerChain[dlg.pickerChain.length - 1]
+                    return dest !== orchidee.parentOf(dlg.sourcePath) && dest !== dlg.sourcePath
+                }
+                width: 140; height: 34
+                radius: 17
+                color: canMove ? (moveHov.hovered ? ncde.wine2 : ncde.wine4)
+                               : Qt.rgba(139/255, 30/255, 63/255, 0.25)
+                Text {
+                    anchors.centerIn: parent
+                    text: "MOVE HERE"
+                    font.family: theme.titleFont
+                    font.pixelSize: theme.fontSmall + theme.scale(1)
+                    color: moveBtn.canMove ? ncde.surface
+                                           : Qt.rgba(248/255, 239/255, 216/255, 0.5)
+                    font.letterSpacing: 1
+                }
+                HoverHandler { id: moveHov }
+                TapHandler {
+                    enabled: moveBtn.canMove
+                    onTapped: {
+                        var dest = dlg.pickerChain[dlg.pickerChain.length - 1]
+                        if (orchidee.moveTo(dlg.sourcePath, dest)) {
+                            dlg.close()
+                            dlg.done()
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

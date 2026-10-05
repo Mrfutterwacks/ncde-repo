@@ -1,0 +1,10 @@
+#!/bin/bash
+# Pre-update safety net: a Timeshift (Soundings) snapshot right before a new
+# NCDE is unpacked. Skipped quietly when Timeshift isn't set up; never blocks
+# the update.
+if command -v timeshift >/dev/null && [ -s /etc/timeshift/timeshift.json ]; then
+  timeout 20m timeshift --create --scripted --tags O --comments "before NCDE update" >/dev/null 2>&1 \
+    && echo "Soundings snapshot taken before the NCDE update." \
+    || echo "Soundings snapshot failed — continuing (rollback: ncde-rollback)."
+fi
+exit 0

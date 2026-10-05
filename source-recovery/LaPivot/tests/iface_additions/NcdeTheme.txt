@@ -1,0 +1,49 @@
+# NcdeTheme system members removed because the class is never constructed and no QML
+# context object binds to NcdeTheme; main.cpp's "ncde" object is NCDEEngine.
+
+# REMOVED: wifiEnabled
+# REMOVED: wifiNetworks
+# REMOVED: activeNetwork
+# REMOVED: vpnConnections
+# REMOVED: bluetoothEnabled
+# REMOVED: bluetoothDiscoverable
+# REMOVED: bluetoothDevices
+# REMOVED: detectedTzName
+# REMOVED: detectedZone
+# REMOVED: detectedRegion
+# REMOVED: detectedOffset
+# REMOVED: localTime
+# REMOVED: locating
+# REMOVED: users
+# REMOVED: printers
+# REMOVED: appStreams
+# REMOVED: wifiChanged signal
+# REMOVED: dateTimeChanged signal
+# REMOVED: usersChanged signal
+# REMOVED: printersChanged signal
+# REMOVED: soundChanged signal
+# REMOVED: setWifiEnabled
+# REMOVED: connectNetwork
+# REMOVED: disconnectNetwork
+# REMOVED: connectVpn
+# REMOVED: disconnectVpn
+# REMOVED: setBluetoothEnabled
+# REMOVED: setBluetoothDiscoverable
+# REMOVED: bluetoothConnect
+# REMOVED: bluetoothDisconnect
+# REMOVED: bluetoothPair
+# REMOVED: bluetoothRemove
+# REMOVED: bluetoothScan
+# REMOVED: refreshLocation
+# REMOVED: setTimezone
+# REMOVED: setNtp
+# REMOVED: addUser
+# REMOVED: removeUser
+# REMOVED: setUserAdmin
+# REMOVED: changePassword
+# REMOVED: setAutoLogin
+# REMOVED: setUserAvatar
+# REMOVED: setDefaultPrinter
+# REMOVED: removePrinter
+# REMOVED: setAppVolume
+

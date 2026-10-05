@@ -1,0 +1,14 @@
+#!/bin/sh
+# /usr/bin/ncde-lock-xss — what xss-lock runs as the locker. Exec, no fork
+# (the no-fork rule from xss-lock(1)): xss-lock waits on this process.
+#
+# Settings > Security "Require password after sleep or screensaver begins" (security.json requirePassword)
+# decides the lock before SLEEP: xss-lock sets XSS_SLEEP_LOCK_FD only for that case. With the switch off the
+# session sleeps unlocked (exiting releases xss-lock's sleep delay). An explicit lock (Lock menu, lid "lock",
+# loginctl lock-session, the idle lock LaPivot asks for) always locks. Missing/unreadable file = lock.
+# (2026-09-30: the switch was saved but never used — the session locked before every suspend regardless.)
+if [ -n "$XSS_SLEEP_LOCK_FD" ] \
+   && [ "$(jq -r '.requirePassword' "$HOME/.config/ncde/security.json" 2>/dev/null)" = "false" ]; then
+    exit 0
+fi
+exec ncde-lock --lock "$@"

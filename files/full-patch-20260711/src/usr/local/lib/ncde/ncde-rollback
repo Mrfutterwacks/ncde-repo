@@ -1,0 +1,67 @@
+#!/bin/bash
+# ncde-rollback <BAK-id> — NCDE System Restore ("Soundings") restore engine.
+#
+# Makes the chosen read-only boot snapshot the new system root (@) using the
+# swap-and-set-default method, then exits 0. It does NOT reboot — RestoreBackend
+# emits restoreDone() on success and the QML calls backend.reboot(). The next
+# boot's ncde-snapshot deletes the old (broken) @_old_* that we set aside here
+# (you cannot delete the @ you are currently booted from).
+#
+# Emits  PHASE: <text> / PROGRESS: <0-100> / ERROR: <msg>  lines on stdout for the
+# backend to turn into restorePhase()/restoreProgress()/restoreError() signals.
+# btrfs only. No rsync, no simulation — the percentages mark real completed phases
+# (btrfs snapshot/rename/set-default are near-instant COW metadata operations).
+set -euo pipefail
+
+id=${1:-}
+
+phase(){ printf 'PHASE: %s\n' "$*"; }
+prog(){  printf 'PROGRESS: %s\n' "$*"; }
+fail(){  printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+
+[[ $EUID -eq 0 ]]             || fail "must run as root"
+[[ -n "$id" ]]               || fail "no snapshot id given"
+[[ "$id" =~ ^BAK-[0-9]+$ ]]  || fail "invalid snapshot id: $id"
+command -v btrfs >/dev/null   || fail "btrfs-progs not found"
+command -v findmnt >/dev/null || fail "findmnt not found"
+
+phase "Charting the descent"; prog 5
+
+[[ "$(findmnt -no FSTYPE /)" == btrfs ]] || fail "root filesystem is not btrfs"
+root_src=$(findmnt -no SOURCE /) || fail "cannot determine root source"
+dev=${root_src%%[*}
+
+TOP=$(mktemp -d /run/ncde-rollback.XXXXXX)
+cleanup(){ mountpoint -q "$TOP" && umount "$TOP" 2>/dev/null || true; rmdir "$TOP" 2>/dev/null || true; }
+trap cleanup EXIT
+mount -o subvolid=5 "$dev" "$TOP" || fail "cannot mount btrfs top-level"
+
+snap="$TOP/@restore/$id"
+[[ -d "$snap" ]] || fail "snapshot $id not found"
+btrfs subvolume show "$snap" >/dev/null 2>&1 || fail "$id is not a btrfs subvolume"
+
+phase "Raising the saved state"; prog 30
+# Writable copy of the chosen read-only snapshot, staged as the new @.
+new="$TOP/@-new-$$"
+[[ -e "$new" ]] && fail "stale $new exists"
+btrfs subvolume snapshot "$snap" "$new" || fail "could not create writable copy"
+prog 55
+
+phase "Swapping the helm"; prog 70
+ts=$(date +%Y%m%d-%H%M%S)
+mv "$TOP/@" "$TOP/@_old_$ts" || fail "could not move current @ aside"
+if ! mv "$new" "$TOP/@"; then
+    mv "$TOP/@_old_$ts" "$TOP/@" 2>/dev/null || true   # best-effort undo of the swap
+    btrfs subvolume delete "$new" 2>/dev/null || true
+    fail "could not move restored snapshot into place"
+fi
+prog 85
+
+phase "Setting the new course"; prog 92
+newid=$(btrfs subvolume show "$TOP/@" | awk -F': *' '/Subvolume ID/{print $2; exit}')
+[[ -n "$newid" ]] || fail "could not read new @ subvolume id"
+btrfs subvolume set-default "$newid" "$TOP" || fail "set-default failed"
+
+sync
+phase "Restored — surfacing to your realm"; prog 100
+exit 0

@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Orchidée
+GenericName=File Manager
+Comment=Browse your files
+Exec=/usr/local/bin/orchidee %U
+Icon=system-file-manager
+Terminal=false
+Categories=System;Utility;FileManager;
+MimeType=inode/directory;
+Keywords=files;folder;manager;browser;
+StartupNotify=true

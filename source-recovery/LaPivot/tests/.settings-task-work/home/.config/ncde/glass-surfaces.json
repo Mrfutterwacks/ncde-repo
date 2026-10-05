@@ -1,0 +1,9 @@
+{
+    "test-surface": {
+        "border": "#80010203",
+        "glow": 0.3,
+        "glowColor": "#20040506",
+        "shine": 0.2,
+        "tint": "#4d123456"
+    }
+}

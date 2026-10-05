@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Test Editor
+Exec=record-app editor
+Icon=text-editor
+Categories=Utility;TextEditor;
+NoDisplay=false
+Hidden=false

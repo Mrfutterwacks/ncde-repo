@@ -1,0 +1,7 @@
+#%PAM-1.0
+# /etc/pam.d/ncde-portal-autologin — live/kiosk path. No password asked, but the
+# account and session stacks still run so logind registration stays intact.
+auth      required  pam_permit.so
+account   include   system-login
+password  include   system-login
+session   include   system-login

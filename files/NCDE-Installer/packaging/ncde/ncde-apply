@@ -1,0 +1,236 @@
+#!/bin/bash
+# ncde-apply — run the NCDE patch that pacman just installed, for every person
+# on this machine. Started by 95-ncde-apply.hook after any transaction that
+# touches the ncde package (NCDE Command's System Update, pacman -Syu, ...).
+#
+# The patch itself may call pacman (qt6-webengine, libsecret) and pacman holds
+# its lock for the whole transaction, so the patch cannot run INSIDE the hook:
+# the hook only queues ncde-apply.service, which waits for the lock to clear.
+set -u
+PATCH=/usr/lib/ncde-update/ncde-full-patch.sh
+LOGDIR=/var/log/ncde
+STATE=/var/lib/ncde-update
+LOCK=/var/lib/pacman/db.lck
+
+is_deployable_payload(){
+  case "$1" in
+    etc/picom.conf|etc/pacman.d/hooks/*ncde*|etc/udev/rules.d/90-ncde-*|\
+    etc/X11/xinit/xinitrc.d/*ncde*|etc/X11/xorg.conf.d/10-ncde.conf|\
+    etc/dbus-1/system.d/io.ncde.Sentinel.conf|\
+    etc/fail2ban/jail.d/ncde-sshd.local|\
+    etc/ld.so.conf.d/ncde-compat.conf|\
+    etc/modules-load.d/ncde-*.conf|etc/pam.d/ncde-*|\
+    etc/ncde/xsession|etc/ncde-release|\
+    etc/sysctl.d/99-ncde-zen.conf|\
+    etc/systemd/logind.conf.d/ncde-console.conf|\
+    etc/systemd/logind.conf.d/do-not-suspend.conf|\
+    etc/polkit-1/rules.d/*ncde*.rules|
+    etc/systemd/user/ncde-*|\
+    etc/skel/.config/gtk-3.0/settings.ini|etc/skel/.config/gtk-4.0/settings.ini|\
+    etc/skel/.config/ncde/*|etc/skel/.config/ncde-terminal/*|\
+    etc/skel/.themes/NCDE/*|etc/skel/Pictures/wallpapers/*.png|etc/skel/.zshrc.local|\
+    usr/lib/gtk-2.0/2.10.0/modules/ncde-gtk-module.so|\
+    usr/lib/gtk-3.0/modules/ncde-gtk-module.so|usr/lib/ncde/*|usr/lib/ncde/*/*|\
+    usr/lib/ncde/*/*/*|usr/lib/qt6/qml/NCDE/*|usr/lib/qt6/qml/NCDE/*/*|\
+    usr/lib/systemd/system/ncde-*|usr/lib/systemd/user/ncde-*|\
+    usr/lib/systemd/user/vesper-*|usr/lib/systemd/user/verdant-helper*|\
+    usr/lib/systemd/user/cal-reminders*|usr/bin/ncde-*|usr/local/bin/ncde-*|\
+    usr/local/bin/sentinel/*|\
+    usr/local/bin/LaPivot|usr/local/bin/abacus|usr/local/bin/binnie|\
+    usr/local/bin/cal-reminders|usr/local/bin/dovecote-relay|\
+    usr/local/bin/hummingbird-courier|usr/local/bin/xinput|\
+    usr/local/bin/magpie-notify|usr/local/bin/magpie-talker|\
+    usr/local/bin/orchidee|usr/local/bin/verdantfolio|usr/local/bin/verve-text|\
+    usr/local/bin/verda|usr/local/bin/verdafetch|\
+    usr/local/lib/ncde/*|usr/local/lib/ncde/*/*|\
+    usr/local/share/ncde-fix/ncde-hw-report.sh|\
+    usr/local/share/ncde-terminal/*|usr/local/share/ncde-terminal/*/*|\
+    usr/local/share/ncde-terminal/*/*/*|usr/share/applications/ncde-*.desktop|\
+    usr/share/applications/abacus.desktop|usr/share/applications/binnie.desktop|\
+    usr/share/applications/cal-reminders.desktop|usr/share/applications/magpie-*.desktop|\
+    usr/share/applications/orchidee.desktop|usr/share/applications/verdantfolio.desktop|\
+    usr/share/applications/verve-text.desktop|usr/share/fonts/ncde/*|\
+    usr/share/fonts/ncde/*/*|usr/share/fonts/ncde-firamono/*|usr/share/themes/NCDE/*|\
+    usr/share/ncde/*|usr/share/ncde/*/*|usr/share/ncde/*/*/*|\
+    usr/share/ncde/*/*/*/*|usr/share/polkit-1/actions/org.ncde.*)
+      return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+if [ "${1:-}" = "--queue" ]; then
+  # booted system: hand off to systemd and let pacman finish
+  if [ -d /run/systemd/system ] && systemctl start --no-block ncde-apply.service 2>/dev/null; then
+    echo "NCDE update will apply in the background once this update finishes."
+    exit 0
+  fi
+  # chroot / image build: no systemd to hand off to — say so, don't guess
+  echo "NCDE: no running systemd (chroot?) — run /usr/lib/ncde-update/ncde-apply after pacman exits."
+  exit 0
+fi
+
+[ "$(id -u)" -eq 0 ] || { echo "ncde-apply must run as root"; exit 1; }
+install -d -m 755 "$LOGDIR" "$STATE"
+
+# wait for pacman to release its lock (max 30 min)
+for _ in $(seq 1800); do [ -e "$LOCK" ] || break; sleep 1; done
+[ -e "$LOCK" ] && { echo "pacman still locked after 30 min — giving up; will retry next update"; exit 1; }
+
+VER="$(pacman -Q ncde 2>/dev/null | awk '{print $2}')"
+HOST="$(hostnamectl --static 2>/dev/null || hostname)"
+
+# the double-click installer just ran this exact patch and then joined the
+# repo: don't run the same patch a second time
+if [ -f "$STATE/just-applied" ] && [ "$(cat "$STATE/just-applied")" = "$(sha256sum "$PATCH" | cut -d' ' -f1)" ]; then
+  rm -f "$STATE/just-applied"
+  echo "this exact patch was just applied by the installer — nothing to do"
+  exit 0
+fi
+rm -f "$STATE/just-applied"
+LOG="$LOGDIR/apply-${VER:-unknown}-$(date +%Y%m%d-%H%M%S).log"
+printf 'Machine: %s\nNCDE package: %s\n' "$HOST" "${VER:-unknown}" | tee -a "$LOG"
+
+# the people on this machine: real login accounts with a home
+mapfile -t PEOPLE < <(getent passwd | awk -F: '$3>=1000 && $3<60000 && $7 !~ /(nologin|false)$/ {print $1":"$6}' \
+  | while IFS=: read -r u h; do [ -d "$h" ] && echo "$u"; done)
+[ "${#PEOPLE[@]}" -gt 0 ] || { echo "no login accounts found" | tee -a "$LOG"; exit 1; }
+
+# accounts are the owner's, never the patch's: keep the login names and
+# passwords exactly as they were, whatever the patch does
+ACCT=(/etc/passwd /etc/shadow /etc/group /etc/gshadow)
+KEEP="$(mktemp -d)"; chmod 700 "$KEEP"
+for f in "${ACCT[@]}"; do [ -e "$f" ] && cp -a "$f" "$KEEP/"; done
+
+RC=0
+payload_files_checked=0
+user_wallpapers_checked=0
+for u in "${PEOPLE[@]}"; do
+  echo "=== NCDE $VER for $u ===" | tee -a "$LOG"
+  # SUDO_USER is how the patch picks whose home/session it configures
+  SUDO_USER="$u" bash "$PATCH" </dev/null >>"$LOG" 2>&1 || RC=1
+done
+
+for f in "${ACCT[@]}"; do
+  b="$KEEP/$(basename "$f")"
+  [ -e "$b" ] || continue
+  cmp -s "$b" "$f" && continue
+  cp -a "$b" "$f"
+  echo "ACCOUNT GUARD: the patch changed $f — put the original back (names/passwords untouched)" | tee -a "$LOG"
+  RC=1
+done
+rm -rf "$KEEP"
+
+# A successful script exit is not enough: verify every deployed system file
+# against the exact self-contained payload so an incomplete apply cannot look
+# updated. Host-specific location/OAuth files and package-managed ncde-qpa are
+# deliberately excluded from the shared product payload.
+VERIFY="$(mktemp -d /tmp/ncde-apply-verify.XXXXXX)"
+MARKER_LINE="$(grep -an -m1 '^__NCDE_PATCH_ARCHIVE_BELOW__$' "$PATCH" | cut -d: -f1)"
+if [ -z "$MARKER_LINE" ] || ! tail -n "+$((MARKER_LINE + 1))" "$PATCH" \
+    | base64 -d | tar xzf - -C "$VERIFY"; then
+  echo "Payload verification failed: the installed NCDE patch archive is missing or invalid" | tee -a "$LOG"
+  RC=1
+else
+  PAYLOAD_SRC="$VERIFY/full-patch-20260711/src"
+  if [ ! -d "$PAYLOAD_SRC/etc" ] || [ ! -d "$PAYLOAD_SRC/usr" ]; then
+    echo "Payload verification failed: staged NCDE system trees are missing" | tee -a "$LOG"
+    RC=1
+  else
+    payload_check_failed=0
+    for tree in "$PAYLOAD_SRC/etc" "$PAYLOAD_SRC/usr"; do
+      while IFS= read -r -d '' file; do
+        rel="${file#"$PAYLOAD_SRC"/}"
+        case "$rel" in
+          # 49-nopasswd-ncde-lock-screen.rules is live-ISO-only: the `live` account has no
+          # password, so an idle-lock prompt there is a dead end, while an installed system's
+          # user DOES have one and must still be asked. The ISO build strips it from installed
+          # systems (files/iso/step21-rootless-refresh.sh) and the patch payload never deploys
+          # it (is_deployable_payload has no etc/polkit-1 entry). It stays in the payload only
+          # as the ISO's source, so there is nothing under /etc to verify it against.
+          etc/polkit-1/rules.d/49-nopasswd-ncde-lock-screen.rules|\
+          *__pycache__*|*.pyc|*prebak*|*.reverted-*|*.retired-*|*.README.md|\
+          usr/share/ncde/controls/_a11y_test.qml|\
+          usr/lib/systemd/system/mpd.service.d/00-arch.conf|\
+          usr/lib/systemd/system/systemd-udevd.service.d/50-rc_keymap.conf|\
+          usr/lib/systemd/system/user-.slice.d/10-defaults.conf|\
+          usr/lib/systemd/system/user@.service.d/10-login-barrier.conf|\
+          usr/lib/systemd/system/user@0.service.d/10-login-barrier.conf|\
+          usr/lib/systemd/user/portable/profile/*/service.conf|\
+          usr/lib/systemd/user/vte-spawn-.scope.d/defaults.conf|\
+          usr/local/bin/hummingbird-courier.QUARANTINED-NOT-A-DROPIN-20260713|\
+          etc/geoclue/conf.d/90-ncde-static.conf|\
+          etc/ncde/hummingbird-google-client.json)
+            continue ;;
+        esac
+        is_deployable_payload "$rel" || {
+          echo "Payload verification failed: unapproved staged product path: $rel" | tee -a "$LOG"
+          payload_check_failed=1
+          continue
+        }
+        case "$rel" in
+          usr/local/bin/LaPivot|\
+          usr/lib/systemd/system/ncde-apply.service|\
+          usr/lib/systemd/user/ncde-update-check.service|\
+          usr/lib/systemd/user/ncde-update-check.timer)
+            continue ;;
+        esac
+        live="/$rel"
+        if [ ! -f "$live" ] || ! cmp -s "$file" "$live"; then
+          echo "Payload verification failed: missing or different deployed file: $live" | tee -a "$LOG"
+          payload_check_failed=1
+        else
+          payload_files_checked=$((payload_files_checked + 1))
+          printf '  verified %s\n' "$live" | tee -a "$LOG"
+        fi
+      done < <(find "$tree" -type f -print0)
+    done
+    wallpaper_src="$PAYLOAD_SRC/etc/skel/Pictures/wallpapers"
+    if [ -d "$wallpaper_src" ]; then
+      for u in "${PEOPLE[@]}"; do
+        home="$(getent passwd "$u" | cut -d: -f6)"
+        while IFS= read -r -d '' wallpaper; do
+          dest="$home/Pictures/wallpapers/${wallpaper##*/}"
+          if [ -f "$dest" ] && cmp -s "$wallpaper" "$dest"; then
+            user_wallpapers_checked=$((user_wallpapers_checked + 1))
+            printf '  verified wallpaper for %s: %s\n' "$u" "$dest" | tee -a "$LOG"
+          else
+            echo "Payload verification failed: NCDE wallpaper missing or different for $u: $dest" | tee -a "$LOG"
+            payload_check_failed=1
+          fi
+        done < <(find "$wallpaper_src" -maxdepth 1 -type f -name '*.png' -print0 | sort -z)
+      done
+    fi
+    if [ "$payload_check_failed" -eq 0 ]; then
+      echo "Payload verification passed: $payload_files_checked NCDE system files and $user_wallpapers_checked per-user wallpaper files match the package." | tee -a "$LOG"
+    else
+      RC=1
+    fi
+  fi
+fi
+rm -rf "$VERIFY"
+
+# the patch reinstalls its prebuilt Qt theme; replace it with one built for THIS Qt
+if [ -x /usr/lib/ncde-qpa/ncde-qpa-rebuild ]; then
+  rm -f /var/lib/ncde-qpa/built-for
+  /usr/lib/ncde-qpa/ncde-qpa-rebuild >>"$LOG" 2>&1
+fi
+
+ln -sfn "$LOG" "$LOGDIR/apply-latest.log"
+printf '%s %s %s\n' "$VER" "$([ $RC -eq 0 ] && echo ok || echo SECTIONS-FAILED)" "$(date -Is)" > "$STATE/last-apply"
+printf '%s | NCDE %s: %s; %s system payload files and %s user wallpapers verified; details: %s\n' \
+  "$HOST" "${VER:-unknown}" "$([ "$RC" -eq 0 ] && echo SUCCESS || echo FAILED)" \
+  "$payload_files_checked" "$user_wallpapers_checked" "$LOGDIR/apply-latest.log" \
+  > "$STATE/last-apply-summary"
+
+# tell whoever is logged in
+if [ "$RC" -eq 0 ]; then
+  MSG="NCDE $VER installed successfully on $HOST: $payload_files_checked system files and $user_wallpapers_checked wallpapers verified. Full installed-file list: $LOGDIR/apply-latest.log"
+else
+  MSG="NCDE $VER update on $HOST FAILED verification. See $LOGDIR/apply-latest.log and $STATE/last-apply-summary."
+fi
+for u in "${PEOPLE[@]}"; do
+  uid="$(id -u "$u")"; [ -S "/run/user/$uid/bus" ] || continue
+  sudo -u "$u" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" DISPLAY=:0 \
+    notify-send -a NCDE -i system-software-update "NCDE updated" "$MSG" 2>/dev/null || true
+done
+exit $RC

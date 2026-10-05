@@ -1,0 +1,16 @@
+#%PAM-1.0
+# /etc/pam.d/ncde-restore — admin-seal check for System Restore ("Soundings").
+#
+# Verifies the admin secret ONLY (modeled on /etc/pam.d/ncde-lock), and never
+# opens a login session: the recovery app already runs as root on its own VT and
+# only needs to confirm the operator knows the admin password before performing a
+# btrfs rollback. Use system-auth (NOT system-login) — system-login would open a
+# new login session and can lock the user out, exactly the failure ncde-lock
+# documents. pam_faillock in Arch's system-auth already provides repeated-failure
+# lockout (tune deny/unlock_time in /etc/security/faillock.conf); do NOT add a
+# second counter here.
+#
+# Optional fingerprint unlock: uncomment the next line (this file only).
+# auth     sufficient pam_fprintd.so
+auth     include    system-auth
+account  include    system-auth

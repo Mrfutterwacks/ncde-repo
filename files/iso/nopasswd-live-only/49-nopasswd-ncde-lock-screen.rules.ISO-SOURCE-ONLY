@@ -1,0 +1,21 @@
+/* NCDE — locking the session must never ask for a password.
+ *
+ * LaPivot owns the idle policy and asks for the idle lock; ncde-lock-xss hands it to
+ * ncde-portal, which calls logind's LockScreen (org.freedesktop.login1.lock-screen). That action
+ * defaults to auth_admin, so xfce-polkit put up a password dialog on every idle timeout.
+ *
+ * On the live ISO that dialog is a TRAP: the `live` account ships with a locked password
+ * (`live:!:...` in /etc/shadow), so the prompt can never be satisfied — the machine sat locked with
+ * no way back in short of a reboot.
+ *
+ * Locking is a self-service action: the user is only locking their own session, and nothing is
+ * gained by authenticating for it. Standard desktops allow it for the active session too. This
+ * grants it unconditionally.
+ *
+ * unlock-screen is deliberately NOT granted — unlocking must still require the user's own password.
+ */
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.login1.lock-screen") {
+        return polkit.Result.YES;
+    }
+});

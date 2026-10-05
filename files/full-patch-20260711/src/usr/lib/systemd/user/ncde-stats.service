@@ -1,0 +1,19 @@
+[Unit]
+Description=NCDE live stats bridge (top processes + backlight -> JSON)
+# Pure userspace /proc + /sys/class/backlight reader. Nothing near ncde-portal/logind.
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/ncde-stats-helper
+Restart=always
+RestartSec=3
+Nice=5
+# Least privilege: it only needs to read /proc and /sys and write its own JSON.
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%t %C
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

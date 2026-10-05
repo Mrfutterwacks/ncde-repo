@@ -1,0 +1,4 @@
+#!/bin/bash
+# sig <Class::name> [file] — essentials of a decomp function: string literals, fields, calls, branches (in order)
+F=${2:-/run/media/stephen/NCDE-BACKUP/my-project/source-recovery/LaPivot/decomp/Lelan.c}
+awk -v n="$1" '/^\/\/ ==== [0-9a-f]+  /{p=($4==n)} p' "$F" | grep -oE 'L"([^"\\]|\\.)*"|"[^"]{2,}"|this ?\+ ?0x[0-9a-f]+|this\[0x[0-9a-f]+\]|param_[0-9] ?\+ ?0x[0-9a-f]+|[A-Z][A-Za-z0-9_]*::[a-z][A-Za-z0-9_]*(<[^>(]*>)?\(|\b(if|else|while|for|switch|return)\b|[<>=!]= ?-?[0-9.x]+|[<>] -?[0-9.]+' | grep -v -E '^(QArrayDataPointer|QString::QString|QString::~|QList<QString>::QList|QMap<QString,QVariant>::QMap|::QVariant::QVariant|QVariant::QVariant|QFlags|QMetaObject::Connection)' | awk 'BEGIN{ORS=" "} {print} END{print "\n"}'
